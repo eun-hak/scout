@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Source Scout</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="hero">
+    <div>
+      <p class="eyebrow">SHORTS RESEARCH DESK</p>
+      <h1>Source Scout</h1>
+      <p>쓸 만한 영상보다, 설명할 가치와 사용할 권리가 있는 영상을 찾습니다.</p>
+    </div>
+    <a class="button secondary" href="/api/export.csv">CSV 내보내기</a>
+  </header>
+
+  <main>
+    <section class="stats" id="stats"></section>
+
+    <section class="panel">
+      <div class="section-title">
+        <div><span>01</span><h2>새 후보 등록</h2></div>
+        <p>링크를 저장한 뒤 검토와 권리 확인을 분리해서 진행하세요.</p>
+      </div>
+      <form id="candidate-form">
+        <div class="form-grid">
+          <label class="wide">원본 URL<input name="url" type="url" required placeholder="https://www.instagram.com/reel/..."></label>
+          <label>가제<input name="title" required placeholder="벽을 두드리는 작업자"></label>
+          <label>원작자<input name="creator" placeholder="@creator"></label>
+          <label>테마<select name="theme"><option>직업·공정</option><option>진위 검증</option><option>감동 스토리</option><option>동물</option><option>과학·원리</option><option>기타</option></select></label>
+          <label>권리 상태<select name="rights_status"><option value="unknown">미확인</option><option value="contact_needed">연락 필요</option><option value="requested">허락 요청함</option><option value="permitted">사용 허락</option><option value="licensed">라이선스</option><option value="public_domain">퍼블릭 도메인</option></select></label>
+          <label class="wide">메모<textarea name="notes" placeholder="왜 이 영상이 흥미로운지, 설명할 정보는 무엇인지"></textarea></label>
+        </div>
+        <details>
+          <summary>상세 평가 점수 설정</summary>
+          <div class="score-grid">
+            <label>첫 장면 집중도<input name="hook_score" type="range" min="1" max="5" value="3"><output>3</output></label>
+            <label>설명 가능성<input name="explainability_score" type="range" min="1" max="5" value="3"><output>3</output></label>
+            <label>한국 시청자 신선도<input name="novelty_score" type="range" min="1" max="5" value="3"><output>3</output></label>
+            <label>편집 적합성<input name="editability_score" type="range" min="1" max="5" value="3"><output>3</output></label>
+            <label>원작자 추적성<input name="traceability_score" type="range" min="1" max="5" value="3"><output>3</output></label>
+            <label>권리·안전 위험도<input name="risk_score" type="range" min="1" max="5" value="3"><output>3</output></label>
+          </div>
+        </details>
+        <div class="form-actions"><p id="form-message"></p><button class="button" type="submit">후보 저장</button></div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="section-title queue-heading">
+        <div><span>02</span><h2>검토 대기열</h2></div>
+        <div class="filters">
+          <select id="status-filter"><option value="">모든 상태</option><option value="new">새 후보</option><option value="reviewing">검토 중</option><option value="permission_needed">허락 필요</option><option value="approved">승인</option><option value="rejected">제외</option></select>
+          <select id="theme-filter"><option value="">모든 테마</option><option>직업·공정</option><option>진위 검증</option><option>감동 스토리</option><option>동물</option><option>과학·원리</option><option>기타</option></select>
+        </div>
+      </div>
+      <div id="candidate-list" class="candidate-list"></div>
+    </section>
+  </main>
+  <template id="candidate-template">
+    <article class="candidate">
+      <div class="score-ring"><strong></strong><small>/100</small></div>
+      <div class="candidate-main">
+        <div class="candidate-top"><div><span class="platform"></span><span class="theme"></span><h3></h3></div><a target="_blank" rel="noreferrer">원본 열기 ↗</a></div>
+        <p class="meta"></p><p class="notes"></p>
+        <div class="candidate-controls">
+          <label>작업 상태<select class="status"></select></label>
+          <label>권리 상태<select class="rights"></select></label>
+          <button class="text-button delete" type="button">삭제</button>
+        </div>
+      </div>
+    </article>
+  </template>
+  <script src="/app.js"></script>
+</body>
+</html>
+

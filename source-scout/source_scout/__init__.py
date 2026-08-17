@@ -1,0 +1,2 @@
+"""Source Scout package."""
+
