@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Source Scout Collector",
-  "version": "0.2.0",
+  "version": "0.5.0",
   "description": "현재 보고 있는 영상 페이지를 로컬 Source Scout에 등록합니다.",
-  "permissions": ["activeTab", "scripting"],
-  "host_permissions": ["http://127.0.0.1:8765/*"],
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["http://127.0.0.1:8765/*", "https://scout.jisiknarae.com/*"],
   "action": {
     "default_title": "Source Scout에 등록",
     "default_popup": "popup.html"

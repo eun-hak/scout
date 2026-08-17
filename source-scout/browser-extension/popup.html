@@ -6,19 +6,25 @@
     body { width: 310px; margin: 0; padding: 18px; color: #13211d; background: #fffdf7; font: 14px system-ui, sans-serif; }
     h1 { margin: 0 0 6px; font: 700 24px Georgia, serif; }
     p { color: #64736d; line-height: 1.45; }
-    button, a { display: block; width: 100%; box-sizing: border-box; padding: 11px; border: 0; border-radius: 999px; text-align: center; font-weight: 800; text-decoration: none; }
+    button, a { display: block; width: 100%; box-sizing: border-box; margin-top:8px; padding: 11px; border: 0; border-radius: 999px; text-align: center; font-weight: 800; text-decoration: none; }
     button { color: white; background: #ff5b35; cursor: pointer; }
+    button.secondary { color:#1d5a48; background:#e8f0ec; }
     button:disabled { opacity: .55; }
     a { margin-top: 8px; color: #1d5a48; background: #e8f0ec; }
     #status { min-height: 38px; font-size: 12px; }
+    label { display:grid; gap:4px; margin-top:8px; color:#64736d; font-size:11px; font-weight:700; }
+    input { width:100%; box-sizing:border-box; padding:8px; border:1px solid #d8d3c8; border-radius:6px; }
   </style>
 </head>
 <body>
   <h1>Source Scout</h1>
   <p>현재 페이지의 공개 제목·설명·게시자 정보를 읽어 후보로 등록합니다.</p>
+  <label>서버<input id="server" value="https://scout.jisiknarae.com"></label>
+  <label>기기 토큰<input id="token" type="password" placeholder="대시보드에서 생성한 ss_... 토큰"></label>
+  <button id="save" class="secondary">연결 저장</button>
   <button id="collect">현재 페이지 등록</button>
   <p id="status">서버 연결을 확인하는 중입니다.</p>
-  <a href="http://127.0.0.1:8765" target="_blank">대시보드 열기</a>
+  <a id="dashboard" href="https://scout.jisiknarae.com" target="_blank">대시보드 열기</a>
   <script src="popup.js"></script>
 </body>
 </html>

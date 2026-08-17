@@ -53,6 +53,9 @@ python -m unittest discover -s tests -v
 - SQLite 로컬 저장
 - Chrome 확장 프로그램을 통한 현재 페이지 원클릭 등록
 - 공개 페이지 메타데이터 기반 테마·점수 자동 제안
+- 설치형 PWA와 Android 공유 대상
+- 기기별 모바일 API 토큰과 iPhone 단축어 연동
+- YouTube·Reddit·RSS/Atom 피드 주기적 자동 탐색
 
 ## Chrome 원클릭 등록 설치
 
@@ -64,6 +67,38 @@ python -m unittest discover -s tests -v
 6. Instagram, TikTok 또는 YouTube 영상 페이지에서 Source Scout 아이콘을 누릅니다.
 
 확장 프로그램은 현재 탭에서 공개된 제목, 설명, 게시자, 대표 이미지 주소만 읽습니다. 영상을 다운로드하거나 계정을 자동 순회하지 않습니다.
+
+## 모바일 공유
+
+Android에서는 HTTPS 대시보드를 홈 화면에 설치한 뒤 Instagram·TikTok의 공유 대상에서 Source Scout를 선택합니다.
+
+iPhone에서는 대시보드의 **기기 토큰 만들기**로 토큰을 만든 다음 단축어에 다음 요청을 설정합니다.
+
+- URL: `https://scout.jisiknarae.com/api/mobile-share`
+- 메서드: `POST`
+- 헤더: `Authorization: Bearer 발급받은_토큰`
+- JSON 본문: `url`, `title`, `description`, `auto_analyze: true`, `rights_status: unknown`
+
+## 자동 탐색
+
+대시보드에서 YouTube 채널 RSS, Reddit RSS 또는 일반 RSS/Atom 주소를 등록할 수 있습니다. 서버는 기본 60분마다 피드를 확인하고 새 URL만 후보로 저장합니다. 주기는 `SOURCE_SCOUT_DISCOVERY_INTERVAL_MINUTES`로 조정하며 `0`이면 자동 실행을 끕니다.
+
+YouTube 채널 피드 형식:
+
+```text
+https://www.youtube.com/feeds/videos.xml?channel_id=채널_ID
+```
+
+## 영상 분석 서버 연결
+
+기본 분석은 제목·설명·게시자 정보만 사용하며 화면에 `메타데이터만 분석`으로 표시됩니다. 실제 화면·음성 분석 서버가 준비되면 다음 환경변수로 Webhook을 연결합니다.
+
+```text
+SOURCE_SCOUT_ANALYSIS_WEBHOOK=https://analysis.example.com/analyze
+SOURCE_SCOUT_ANALYSIS_TOKEN=분석_서버_토큰
+```
+
+분석 서버는 후보 JSON을 받고 `theme`, 점수 필드, `analysis_summary`, `analysis_detail`, `script_ideas`를 JSON으로 반환할 수 있습니다.
 
 ## 다음 단계
 

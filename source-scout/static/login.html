@@ -3,6 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1d5a48">
+  <link rel="manifest" href="/manifest.webmanifest">
   <title>Source Scout 로그인</title>
   <style>
     :root { --ink:#13211d; --paper:#f4f0e7; --panel:#fffdf7; --accent:#ff5b35; --green:#1d5a48; }
@@ -39,9 +41,10 @@
       const data = new FormData(form);
       const response = await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:data.get('username'), password:data.get('password')})});
       const body = await response.json().catch(() => ({}));
-      if (response.ok) location.replace('/');
+      if (response.ok) location.replace(new URLSearchParams(location.search).get('next') || '/');
       else message.textContent = body.error || '로그인에 실패했습니다.';
     });
   </script>
+  <script>navigator.serviceWorker?.register('/service-worker.js');</script>
 </body>
 </html>

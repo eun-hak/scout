@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1d5a48">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <title>Source Scout에 공유</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="share-page">
+  <main class="share-card">
+    <p class="eyebrow">MOBILE INBOX</p>
+    <h1>후보 등록</h1>
+    <form id="share-form">
+      <label>공유 URL<input name="url" type="url" required></label>
+      <label>가제<input name="title" required></label>
+      <label>공유 메모<textarea name="description"></textarea></label>
+      <button class="button" type="submit">Source Scout에 저장</button>
+      <p id="share-message"></p>
+    </form>
+  </main>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const form = document.querySelector('#share-form');
+    const text = params.get('text') || '';
+    const sharedUrl = params.get('url') || (text.match(/https?:\/\/\S+/) || [''])[0];
+    form.url.value = sharedUrl;
+    form.title.value = params.get('title') || '모바일 공유 후보';
+    form.description.value = text.replace(sharedUrl, '').trim();
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const message = document.querySelector('#share-message');
+      message.textContent = '저장 중...';
+      const payload = {...Object.fromEntries(new FormData(form)), auto_analyze:true, rights_status:'unknown'};
+      const response = await fetch('/api/mobile-share', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+      if (response.status === 401) {
+        location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
+        return;
+      }
+      const body = await response.json().catch(() => ({}));
+      message.textContent = response.ok ? `등록 완료 · ${body.theme} · ${body.total_score}점` : body.error || '등록에 실패했습니다.';
+    });
+    navigator.serviceWorker?.register('/service-worker.js');
+  </script>
+</body>
+</html>

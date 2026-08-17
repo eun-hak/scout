@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "Source Scout",
+  "short_name": "Scout",
+  "description": "유튜브 쇼츠 영상 후보 수집 및 권리 검토",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f0e7",
+  "theme_color": "#1d5a48",
+  "icons": [
+    {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
+  ],
+  "share_target": {
+    "action": "/share",
+    "method": "GET",
+    "params": {"title": "title", "text": "text", "url": "url"}
+  }
+}

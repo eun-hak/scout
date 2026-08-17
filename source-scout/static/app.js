@@ -5,6 +5,12 @@ const message = document.querySelector('#form-message');
 const statusFilter = document.querySelector('#status-filter');
 const themeFilter = document.querySelector('#theme-filter');
 const logout = document.querySelector('#logout');
+const installButton = document.querySelector('#install-app');
+const tokenList = document.querySelector('#token-list');
+const newToken = document.querySelector('#new-token');
+const sourceForm = document.querySelector('#source-form');
+const sourceList = document.querySelector('#source-list');
+let installPrompt;
 
 const statuses = {
   new: '새 후보', reviewing: '검토 중', permission_needed: '허락 필요', approved: '승인', rejected: '제외'
@@ -51,6 +57,26 @@ async function loadCandidates() {
   data.items.forEach(renderCandidate);
 }
 
+async function loadTokens() {
+  const data = await api('/api/mobile-tokens');
+  tokenList.innerHTML = data.items.length ? data.items.map(item => `
+    <div class="token-row"><div><strong>${escapeHtml(item.label)}</strong><small>생성 ${item.created_at}${item.last_used_at ? ` · 최근 사용 ${item.last_used_at}` : ''}${item.revoked_at ? ' · 폐기됨' : ''}</small></div>
+    ${item.revoked_at ? '' : `<button class="text-button" data-revoke-token="${item.id}" type="button">폐기</button>`}</div>`).join('') : '<p class="muted">등록된 모바일 기기가 없습니다.</p>';
+}
+
+async function loadSources() {
+  const data = await api('/api/discovery-sources');
+  sourceList.innerHTML = data.items.length ? data.items.map(item => `
+    <div class="token-row"><div><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.theme)} · ${escapeHtml(item.feed_url)}${item.last_checked_at ? ` · 확인 ${item.last_checked_at}` : ''}${item.last_error ? ` · 오류 ${escapeHtml(item.last_error)}` : ''}</small></div>
+    <div><button class="text-button" data-run-source="${item.id}" type="button">지금 확인</button><button class="text-button" data-delete-source="${item.id}" type="button">삭제</button></div></div>`).join('') : '<p class="muted">등록된 자동 탐색 소스가 없습니다.</p>';
+}
+
+function escapeHtml(value) {
+  const div = document.createElement('div');
+  div.textContent = value || '';
+  return div.innerHTML;
+}
+
 function renderStats(items) {
   const approved = items.filter(item => item.status === 'approved').length;
   const rightsPending = items.filter(item => ['unknown', 'contact_needed', 'requested'].includes(item.rights_status)).length;
@@ -66,6 +92,12 @@ function renderCandidate(item) {
   const node = template.content.cloneNode(true);
   const article = node.querySelector('.candidate');
   article.dataset.id = item.id;
+  const thumbnail = node.querySelector('.candidate-thumb');
+  if (item.thumbnail_url) {
+    thumbnail.src = item.thumbnail_url;
+    thumbnail.alt = `${item.title} 썸네일`;
+    thumbnail.hidden = false;
+  }
   node.querySelector('.score-ring strong').textContent = item.total_score;
   node.querySelector('.platform').textContent = item.platform;
   node.querySelector('.theme').textContent = item.theme;
@@ -79,12 +111,25 @@ function renderCandidate(item) {
     analysis.textContent = `자동 제안 · ${item.analysis_summary}`;
     node.querySelector('.notes').after(analysis);
   }
+  if (item.analysis_status && item.analysis_status !== 'pending') {
+    const detail = document.createElement('div');
+    detail.className = `analysis-status ${item.analysis_status}`;
+    const labels = {metadata_only:'메타데이터만 분석', complete:'영상 분석 완료', failed:'분석 실패'};
+    let ideas = [];
+    try { ideas = JSON.parse(item.script_ideas || '[]'); } catch { ideas = item.script_ideas ? [item.script_ideas] : []; }
+    detail.innerHTML = `<strong>${labels[item.analysis_status] || escapeHtml(item.analysis_status)}</strong><span>${escapeHtml(item.analysis_detail)}</span>${ideas.length ? `<ol>${ideas.map(idea => `<li>${escapeHtml(idea)}</li>`).join('')}</ol>` : ''}`;
+    node.querySelector('.candidate-controls').before(detail);
+  }
   const statusSelect = node.querySelector('.status');
   const rightsSelect = node.querySelector('.rights');
   statusSelect.innerHTML = options(statuses, item.status);
   rightsSelect.innerHTML = options(rights, item.rights_status);
   statusSelect.addEventListener('change', () => updateCandidate(item.id, {status: statusSelect.value}));
   rightsSelect.addEventListener('change', () => updateCandidate(item.id, {rights_status: rightsSelect.value}));
+  node.querySelector('.analyze').addEventListener('click', async () => {
+    await api(`/api/candidates/${item.id}/analyze`, {method:'POST'});
+    await loadCandidates();
+  });
   node.querySelector('.delete').addEventListener('click', async () => {
     if (!confirm('이 후보를 삭제할까요?')) return;
     await api(`/api/candidates/${item.id}`, {method: 'DELETE'});
@@ -119,8 +164,57 @@ form.addEventListener('submit', async event => {
 });
 
 [statusFilter, themeFilter].forEach(filter => filter.addEventListener('change', loadCandidates));
+document.querySelector('#create-token').addEventListener('click', async () => {
+  const label = prompt('기기 이름을 입력하세요.', '내 휴대폰');
+  if (!label) return;
+  const created = await api('/api/mobile-tokens', {method:'POST', body:JSON.stringify({label})});
+  newToken.hidden = false;
+  newToken.textContent = created.token;
+  await navigator.clipboard?.writeText(created.token).catch(() => undefined);
+  alert('토큰을 클립보드에 복사했습니다. 이 값은 다시 표시되지 않습니다.');
+  loadTokens();
+});
+tokenList.addEventListener('click', async event => {
+  const id = event.target.dataset.revokeToken;
+  if (!id || !confirm('이 기기 토큰을 폐기할까요?')) return;
+  await api(`/api/mobile-tokens/${id}`, {method:'DELETE'});
+  loadTokens();
+});
+sourceForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  await api('/api/discovery-sources', {method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(sourceForm)))});
+  sourceForm.reset();
+  loadSources();
+});
+sourceList.addEventListener('click', async event => {
+  const runId = event.target.dataset.runSource;
+  const deleteId = event.target.dataset.deleteSource;
+  if (runId) {
+    event.target.disabled = true;
+    const result = await api(`/api/discovery-sources/${runId}/run`, {method:'POST'});
+    alert(`신규 ${result.created}개 · 중복 ${result.duplicates}개 · 오류 ${result.errors}개`);
+    await Promise.all([loadSources(), loadCandidates()]);
+  }
+  if (deleteId && confirm('이 탐색 소스를 삭제할까요?')) {
+    await api(`/api/discovery-sources/${deleteId}`, {method:'DELETE'});
+    loadSources();
+  }
+});
+window.addEventListener('beforeinstallprompt', event => {
+  event.preventDefault();
+  installPrompt = event;
+  installButton.hidden = false;
+});
+installButton.addEventListener('click', async () => {
+  await installPrompt?.prompt();
+  installPrompt = null;
+  installButton.hidden = true;
+});
 logout.addEventListener('click', async () => {
   await fetch('/api/logout', {method: 'POST'});
   location.replace('/login');
 });
 loadCandidates().catch(error => list.innerHTML = `<div class="empty">${error.message}</div>`);
+loadTokens().catch(() => undefined);
+loadSources().catch(() => undefined);
+navigator.serviceWorker?.register('/service-worker.js');

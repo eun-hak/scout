@@ -27,12 +27,34 @@ CREATE TABLE IF NOT EXISTS candidates (
     source TEXT NOT NULL DEFAULT 'manual',
     analysis_summary TEXT NOT NULL DEFAULT '',
     thumbnail_url TEXT NOT NULL DEFAULT '',
+    analysis_status TEXT NOT NULL DEFAULT 'pending',
+    analysis_detail TEXT NOT NULL DEFAULT '',
+    script_ideas TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);
 CREATE INDEX IF NOT EXISTS idx_candidates_theme ON candidates(theme);
 CREATE INDEX IF NOT EXISTS idx_candidates_score ON candidates(total_score DESC);
+CREATE TABLE IF NOT EXISTS mobile_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TEXT,
+    revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mobile_tokens_hash ON mobile_tokens(token_hash);
+CREATE TABLE IF NOT EXISTS discovery_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT NOT NULL,
+    feed_url TEXT NOT NULL UNIQUE,
+    theme TEXT NOT NULL DEFAULT '기타',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_checked_at TEXT,
+    last_error TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -51,6 +73,9 @@ class Database:
             "source": "TEXT NOT NULL DEFAULT 'manual'",
             "analysis_summary": "TEXT NOT NULL DEFAULT ''",
             "thumbnail_url": "TEXT NOT NULL DEFAULT ''",
+            "analysis_status": "TEXT NOT NULL DEFAULT 'pending'",
+            "analysis_detail": "TEXT NOT NULL DEFAULT ''",
+            "script_ideas": "TEXT NOT NULL DEFAULT ''",
         }
         for name, definition in additions.items():
             if name not in columns:
@@ -106,3 +131,75 @@ class Database:
         with self.connect() as connection:
             cursor = connection.execute("DELETE FROM candidates WHERE id = ?", (candidate_id,))
             return cursor.rowcount > 0
+
+    def create_mobile_token(self, label: str, token_hash: str) -> dict:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "INSERT INTO mobile_tokens (label, token_hash) VALUES (?, ?)", (label, token_hash)
+            )
+            row = connection.execute(
+                "SELECT id, label, created_at, last_used_at, revoked_at FROM mobile_tokens WHERE id = ?",
+                (cursor.lastrowid,),
+            ).fetchone()
+            return dict(row)
+
+    def list_mobile_tokens(self) -> list[dict]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT id, label, created_at, last_used_at, revoked_at FROM mobile_tokens ORDER BY created_at DESC"
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def validate_mobile_token(self, token_hash: str) -> bool:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT id FROM mobile_tokens WHERE token_hash = ? AND revoked_at IS NULL", (token_hash,)
+            ).fetchone()
+            if not row:
+                return False
+            connection.execute(
+                "UPDATE mobile_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?", (row["id"],)
+            )
+            return True
+
+    def revoke_mobile_token(self, token_id: int) -> bool:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "UPDATE mobile_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE id = ? AND revoked_at IS NULL",
+                (token_id,),
+            )
+            return cursor.rowcount > 0
+
+    def create_discovery_source(self, label: str, feed_url: str, theme: str) -> dict:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "INSERT INTO discovery_sources (label, feed_url, theme) VALUES (?, ?, ?)",
+                (label, feed_url, theme),
+            )
+            row = connection.execute("SELECT * FROM discovery_sources WHERE id = ?", (cursor.lastrowid,)).fetchone()
+            return dict(row)
+
+    def list_discovery_sources(self, enabled_only: bool = False) -> list[dict]:
+        where = "WHERE enabled = 1" if enabled_only else ""
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM discovery_sources {where} ORDER BY created_at DESC"
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_discovery_source(self, source_id: int) -> dict | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM discovery_sources WHERE id = ?", (source_id,)).fetchone()
+            return dict(row) if row else None
+
+    def delete_discovery_source(self, source_id: int) -> bool:
+        with self.connect() as connection:
+            cursor = connection.execute("DELETE FROM discovery_sources WHERE id = ?", (source_id,))
+            return cursor.rowcount > 0
+
+    def mark_discovery_checked(self, source_id: int, error: str = "") -> None:
+        with self.connect() as connection:
+            connection.execute(
+                "UPDATE discovery_sources SET last_checked_at = CURRENT_TIMESTAMP, last_error = ? WHERE id = ?",
+                (error[:1000], source_id),
+            )

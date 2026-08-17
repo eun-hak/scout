@@ -1,6 +1,8 @@
-const SERVER = 'http://127.0.0.1:8765';
 const button = document.querySelector('#collect');
 const status = document.querySelector('#status');
+const serverInput = document.querySelector('#server');
+const tokenInput = document.querySelector('#token');
+let config = {server:'https://scout.jisiknarae.com', token:''};
 
 function pageMetadata() {
   const meta = selector => document.querySelector(selector)?.content?.trim() || '';
@@ -19,7 +21,7 @@ function pageMetadata() {
 
 async function checkServer() {
   try {
-    const response = await fetch(`${SERVER}/api/health`);
+    const response = await fetch(`${config.server}/api/health`);
     if (!response.ok) throw new Error();
     status.textContent = '준비됨 · Instagram, TikTok, YouTube 페이지에서 사용하세요.';
     button.disabled = false;
@@ -35,10 +37,10 @@ button.addEventListener('click', async () => {
   try {
     const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
     const [{result}] = await chrome.scripting.executeScript({target: {tabId: tab.id}, func: pageMetadata});
-    const response = await fetch(`${SERVER}/api/candidates`, {
+    const response = await fetch(`${config.server}/api/mobile-share`, {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({...result, source: 'browser_extension', auto_analyze: true, rights_status: 'unknown'})
+      headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${config.token}`},
+      body: JSON.stringify({...result, source: 'browser_extension', auto_analyze: true, auto_enrich:true, rights_status: 'unknown'})
     });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error || '등록에 실패했습니다.');
@@ -50,4 +52,17 @@ button.addEventListener('click', async () => {
   }
 });
 
-checkServer();
+document.querySelector('#save').addEventListener('click', async () => {
+  config = {server:serverInput.value.replace(/\/$/, ''), token:tokenInput.value.trim()};
+  await chrome.storage.local.set(config);
+  document.querySelector('#dashboard').href = config.server;
+  checkServer();
+});
+
+chrome.storage.local.get(config).then(saved => {
+  config = saved;
+  serverInput.value = config.server;
+  tokenInput.value = config.token;
+  document.querySelector('#dashboard').href = config.server;
+  checkServer();
+});

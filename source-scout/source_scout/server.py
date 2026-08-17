@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import os
 import secrets
 import sqlite3
+import threading
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,8 +15,11 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .analyzer import analyze_metadata
+from .analysis_provider import analyze_candidate
 from .auth import SessionManager
 from .database import Database
+from .discovery import fetch_feed
+from .metadata import canonicalize_url, ensure_public_url, fetch_metadata
 from .scoring import SCORE_FIELDS, calculate_score, clamp_rating
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -52,7 +57,7 @@ def validate_url(value: object) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("http 또는 https 형식의 URL을 입력하세요.")
-    return url
+    return canonicalize_url(url)
 
 
 def normalize_payload(payload: dict, creating: bool = False) -> dict:
@@ -67,6 +72,81 @@ def normalize_payload(payload: dict, creating: bool = False) -> dict:
     if data.get("status") == "approved" and data.get("rights_status") not in APPROVABLE_RIGHTS:
         raise ValueError("사용 허락·라이선스·퍼블릭 도메인이 확인되어야 승인할 수 있습니다.")
     return data
+
+
+def candidate_from_payload(payload: dict, source: str) -> dict:
+    url = validate_url(payload.get("url"))
+    platform = detect_platform(url)
+    title = str(payload.get("title") or "제목 미정").strip()[:500]
+    creator = str(payload.get("creator") or "").strip()[:200]
+    description = str(payload.get("description") or "").strip()[:5000]
+    thumbnail_url = str(payload.get("thumbnail_url") or "").strip()[:2000]
+    if payload.get("auto_enrich") or source == "mobile_share":
+        try:
+            enriched = fetch_metadata(url)
+            url = enriched["url"]
+            platform = detect_platform(url)
+            if title in {"", "제목 미정", "모바일 공유 후보"}:
+                title = enriched["title"][:500] or title
+            creator = creator or enriched["creator"][:200]
+            description = description or enriched["description"][:5000]
+            thumbnail_url = thumbnail_url or enriched["thumbnail_url"][:2000]
+        except (OSError, ValueError):
+            pass
+    data = normalize_payload(payload, creating=True)
+    if payload.get("auto_analyze"):
+        suggestion = analyze_metadata(title, description, creator, platform)
+        for field in ("theme", "analysis_summary", *SCORE_FIELDS):
+            if field not in payload:
+                data[field] = suggestion[field]
+        data["analysis_status"] = "metadata_only"
+        data["analysis_detail"] = "제목·설명·게시자 정보만 분석했습니다."
+    data.update({
+        "url": url,
+        "platform": platform,
+        "title": title,
+        "creator": creator,
+        "theme": str(data.get("theme") or payload.get("theme") or "직업·공정").strip(),
+        "status": str(payload.get("status") or "new"),
+        "rights_status": str(payload.get("rights_status") or "unknown"),
+        "source": "browser_extension" if payload.get("source") == "browser_extension" else source,
+        "thumbnail_url": thumbnail_url,
+    })
+    if description and not data.get("notes"):
+        data["notes"] = description
+    data["total_score"] = calculate_score(data)
+    return DB.create_candidate(data)
+
+
+def run_discovery_source(source: dict) -> dict:
+    created = duplicates = errors = 0
+    try:
+        for entry in fetch_feed(source["feed_url"]):
+            payload = {
+                **entry,
+                "theme": source["theme"],
+                "rights_status": "unknown",
+                "auto_analyze": True,
+            }
+            try:
+                candidate_from_payload(payload, f"feed:{source['id']}")
+                created += 1
+            except sqlite3.IntegrityError:
+                duplicates += 1
+            except (OSError, ValueError):
+                errors += 1
+        DB.mark_discovery_checked(source["id"])
+        return {"created": created, "duplicates": duplicates, "errors": errors}
+    except Exception as exc:
+        DB.mark_discovery_checked(source["id"], str(exc))
+        return {"created": created, "duplicates": duplicates, "errors": errors + 1, "error": str(exc)}
+
+
+def discovery_loop(interval_minutes: int) -> None:
+    while True:
+        for source in DB.list_discovery_sources(enabled_only=True):
+            run_discovery_source(source)
+        threading.Event().wait(interval_minutes * 60)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -96,6 +176,16 @@ class Handler(BaseHTTPRequestHandler):
         token = AUTH.token_from_cookie(self.headers.get("Cookie"))
         return AUTH.validate(token)
 
+    def has_mobile_token(self) -> bool:
+        authorization = self.headers.get("Authorization", "")
+        if not authorization.startswith("Bearer "):
+            return False
+        raw_token = authorization[7:].strip()
+        if not raw_token:
+            return False
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        return DB.validate_mobile_token(token_hash)
+
     def require_auth(self, api: bool = True) -> bool:
         if self.is_authenticated():
             return True
@@ -120,11 +210,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.NO_CONTENT)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/share":
+            self.serve_static_file("share.html")
+            return
         if parsed.path == "/login":
             if self.is_authenticated():
                 self.send_response(HTTPStatus.SEE_OTHER)
@@ -148,6 +241,12 @@ class Handler(BaseHTTPRequestHandler):
             candidates = DB.list_candidates(query.get("status", [""])[0], query.get("theme", [""])[0])
             self.send_json({"items": candidates, "count": len(candidates)})
             return
+        if parsed.path == "/api/mobile-tokens":
+            self.send_json({"items": DB.list_mobile_tokens()})
+            return
+        if parsed.path == "/api/discovery-sources":
+            self.send_json({"items": DB.list_discovery_sources()})
+            return
         if parsed.path == "/api/export.csv":
             self.export_csv()
             return
@@ -160,39 +259,82 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/logout":
             self.logout()
             return
+        if self.path == "/api/mobile-share":
+            if not (self.is_authenticated() or self.has_mobile_token()):
+                self.send_error_json("유효한 모바일 토큰 또는 로그인이 필요합니다.", HTTPStatus.UNAUTHORIZED)
+                return
+            self.create_candidate_request("mobile_share")
+            return
         if not self.require_auth():
             return
-        if self.path != "/api/candidates":
-            self.send_error_json("경로를 찾을 수 없습니다.", 404)
+        if self.path == "/api/mobile-tokens":
+            try:
+                payload = self.read_json()
+                label = str(payload.get("label") or "모바일 기기").strip()[:100]
+                raw_token = f"ss_{secrets.token_urlsafe(32)}"
+                token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+                item = DB.create_mobile_token(label, token_hash)
+                self.send_json({**item, "token": raw_token}, HTTPStatus.CREATED)
+            except ValueError as exc:
+                self.send_error_json(str(exc))
             return
+        if self.path == "/api/discovery-sources":
+            try:
+                payload = self.read_json()
+                label = str(payload.get("label") or "새 피드").strip()[:100]
+                feed_url = validate_url(payload.get("feed_url"))
+                ensure_public_url(feed_url)
+                theme = str(payload.get("theme") or "기타").strip()[:100]
+                self.send_json(DB.create_discovery_source(label, feed_url, theme), HTTPStatus.CREATED)
+            except sqlite3.IntegrityError:
+                self.send_error_json("이미 등록된 피드입니다.", HTTPStatus.CONFLICT)
+            except ValueError as exc:
+                self.send_error_json(str(exc))
+            return
+        if self.path.startswith("/api/discovery-sources/") and self.path.endswith("/run"):
+            try:
+                source_id = int(self.path.strip("/").split("/")[2])
+            except (ValueError, IndexError):
+                self.send_error_json("잘못된 소스 ID입니다.")
+                return
+            source = DB.get_discovery_source(source_id)
+            if not source:
+                self.send_error_json("탐색 소스를 찾을 수 없습니다.", 404)
+                return
+            self.send_json(run_discovery_source(source))
+            return
+        if self.path.startswith("/api/candidates/") and self.path.endswith("/analyze"):
+            try:
+                candidate_id = int(self.path.strip("/").split("/")[2])
+            except (ValueError, IndexError):
+                self.send_error_json("잘못된 후보 ID입니다.")
+                return
+            current = DB.get_candidate(candidate_id)
+            if not current:
+                self.send_error_json("후보를 찾을 수 없습니다.", 404)
+                return
+            try:
+                suggestion = analyze_candidate(current)
+                update = {field: suggestion[field] for field in ("theme", "analysis_summary", *SCORE_FIELDS) if field in suggestion}
+                update["analysis_status"] = suggestion["analysis_status"]
+                update["analysis_detail"] = str(suggestion.get("analysis_detail") or "")[:5000]
+                ideas = suggestion.get("script_ideas") or []
+                update["script_ideas"] = json.dumps(ideas, ensure_ascii=False) if isinstance(ideas, list) else str(ideas)[:10000]
+                update["total_score"] = calculate_score({**current, **update})
+                self.send_json(DB.update_candidate(candidate_id, update))
+            except Exception as exc:
+                DB.update_candidate(candidate_id, {"analysis_status": "failed", "analysis_detail": str(exc)[:1000]})
+                self.send_error_json("분석 작업에 실패했습니다.", 502)
+            return
+        if self.path == "/api/candidates":
+            self.create_candidate_request("manual")
+            return
+        self.send_error_json("경로를 찾을 수 없습니다.", 404)
+
+    def create_candidate_request(self, source: str) -> None:
         try:
             payload = self.read_json()
-            url = validate_url(payload.get("url"))
-            platform = detect_platform(url)
-            title = str(payload.get("title") or "제목 미정").strip()[:500]
-            creator = str(payload.get("creator") or "").strip()[:200]
-            description = str(payload.get("description") or "").strip()[:5000]
-            data = normalize_payload(payload, creating=True)
-            if payload.get("auto_analyze"):
-                suggestion = analyze_metadata(title, description, creator, platform)
-                for field in ("theme", "analysis_summary", *SCORE_FIELDS):
-                    if field not in payload:
-                        data[field] = suggestion[field]
-            data.update({
-                "url": url,
-                "platform": platform,
-                "title": title,
-                "creator": creator,
-                "theme": str(data.get("theme") or payload.get("theme") or "직업·공정").strip(),
-                "status": str(payload.get("status") or "new"),
-                "rights_status": str(payload.get("rights_status") or "unknown"),
-                "source": "browser_extension" if payload.get("source") == "browser_extension" else "manual",
-                "thumbnail_url": str(payload.get("thumbnail_url") or "").strip()[:2000],
-            })
-            if description and not data.get("notes"):
-                data["notes"] = description
-            data["total_score"] = calculate_score(data)
-            self.send_json(DB.create_candidate(data), HTTPStatus.CREATED)
+            self.send_json(candidate_from_payload(payload, source), HTTPStatus.CREATED)
         except sqlite3.IntegrityError:
             self.send_error_json("이미 등록된 URL입니다.", HTTPStatus.CONFLICT)
         except ValueError as exc:
@@ -222,6 +364,30 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         if not self.require_auth():
+            return
+        if urlparse(self.path).path.startswith("/api/mobile-tokens/"):
+            try:
+                token_id = int(urlparse(self.path).path.rsplit("/", 1)[1])
+            except ValueError:
+                self.send_error_json("잘못된 토큰 ID입니다.")
+                return
+            if DB.revoke_mobile_token(token_id):
+                self.send_response(HTTPStatus.NO_CONTENT)
+                self.end_headers()
+            else:
+                self.send_error_json("활성 토큰을 찾을 수 없습니다.", 404)
+            return
+        if urlparse(self.path).path.startswith("/api/discovery-sources/"):
+            try:
+                source_id = int(urlparse(self.path).path.rsplit("/", 1)[1])
+            except ValueError:
+                self.send_error_json("잘못된 소스 ID입니다.")
+                return
+            if DB.delete_discovery_source(source_id):
+                self.send_response(HTTPStatus.NO_CONTENT)
+                self.end_headers()
+            else:
+                self.send_error_json("탐색 소스를 찾을 수 없습니다.", 404)
             return
         candidate_id = self.parse_candidate_id()
         if candidate_id is None:
@@ -303,7 +469,10 @@ class Handler(BaseHTTPRequestHandler):
         if not target.is_file():
             self.send_error_json("경로를 찾을 수 없습니다.", 404)
             return
-        content_types = {".html": "text/html", ".css": "text/css", ".js": "text/javascript"}
+        content_types = {
+            ".html": "text/html", ".css": "text/css", ".js": "text/javascript",
+            ".webmanifest": "application/manifest+json", ".svg": "image/svg+xml",
+        }
         body = target.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", content_types.get(target.suffix, "application/octet-stream") + "; charset=utf-8")
@@ -323,7 +492,10 @@ def run() -> None:
         session_secret = secrets.token_urlsafe(48)
         print("경고: SOURCE_SCOUT_SESSION_SECRET이 없어 임시 키를 사용합니다. 재시작하면 세션이 종료됩니다.")
     session_hours = max(12, int(os.environ.get("SOURCE_SCOUT_SESSION_HOURS", "24")))
+    discovery_interval = max(0, int(os.environ.get("SOURCE_SCOUT_DISCOVERY_INTERVAL_MINUTES", "60")))
     AUTH = SessionManager(username, password, session_secret, session_hours * 3600)
+    if discovery_interval:
+        threading.Thread(target=discovery_loop, args=(discovery_interval,), daemon=True, name="source-discovery").start()
     server = ThreadingHTTPServer((host, port), Handler)
     url = f"http://{host}:{port}"
     print(f"Source Scout 실행 중: {url}")
