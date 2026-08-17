@@ -12,19 +12,24 @@ from http.cookies import SimpleCookie
 class SessionManager:
     cookie_name = "source_scout_session"
 
-    def __init__(self, password: str, secret: str, lifetime_seconds: int = 86_400):
+    def __init__(self, username: str, password: str, secret: str, lifetime_seconds: int = 86_400):
+        if not username:
+            raise ValueError("SOURCE_SCOUT_USERNAME 환경변수가 필요합니다.")
         if not password:
             raise ValueError("SOURCE_SCOUT_PASSWORD 환경변수가 필요합니다.")
         if len(secret) < 32:
             raise ValueError("SOURCE_SCOUT_SESSION_SECRET은 32자 이상이어야 합니다.")
         if lifetime_seconds < 43_200:
             raise ValueError("세션 유지 시간은 최소 12시간이어야 합니다.")
+        self.username = username
         self.password = password
         self.secret = secret.encode("utf-8")
         self.lifetime_seconds = lifetime_seconds
 
-    def verify_password(self, candidate: object) -> bool:
-        return hmac.compare_digest(str(candidate or "").encode("utf-8"), self.password.encode("utf-8"))
+    def verify_credentials(self, username: object, password: object) -> bool:
+        username_valid = hmac.compare_digest(str(username or "").encode("utf-8"), self.username.encode("utf-8"))
+        password_valid = hmac.compare_digest(str(password or "").encode("utf-8"), self.password.encode("utf-8"))
+        return username_valid and password_valid
 
     def issue(self, now: int | None = None) -> str:
         issued_at = int(time.time() if now is None else now)

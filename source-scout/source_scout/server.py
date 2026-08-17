@@ -267,8 +267,8 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self.send_error_json(str(exc))
             return
-        if not AUTH.verify_password(payload.get("password")):
-            self.send_error_json("비밀번호가 올바르지 않습니다.", HTTPStatus.UNAUTHORIZED)
+        if not AUTH.verify_credentials(payload.get("username"), payload.get("password")):
+            self.send_error_json("아이디 또는 비밀번호가 올바르지 않습니다.", HTTPStatus.UNAUTHORIZED)
             return
         token = AUTH.issue()
         self.send_response(HTTPStatus.OK)
@@ -315,13 +315,14 @@ def run() -> None:
     global AUTH
     host = os.environ.get("SOURCE_SCOUT_HOST", "127.0.0.1")
     port = int(os.environ.get("SOURCE_SCOUT_PORT", "8765"))
+    username = os.environ.get("SOURCE_SCOUT_USERNAME", "")
     password = os.environ.get("SOURCE_SCOUT_PASSWORD", "")
     session_secret = os.environ.get("SOURCE_SCOUT_SESSION_SECRET", "")
     if not session_secret:
         session_secret = secrets.token_urlsafe(48)
         print("경고: SOURCE_SCOUT_SESSION_SECRET이 없어 임시 키를 사용합니다. 재시작하면 세션이 종료됩니다.")
     session_hours = max(12, int(os.environ.get("SOURCE_SCOUT_SESSION_HOURS", "24")))
-    AUTH = SessionManager(password, session_secret, session_hours * 3600)
+    AUTH = SessionManager(username, password, session_secret, session_hours * 3600)
     server = ThreadingHTTPServer((host, port), Handler)
     url = f"http://{host}:{port}"
     print(f"Source Scout 실행 중: {url}")

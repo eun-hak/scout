@@ -11,7 +11,7 @@
 
 ## 인증
 
-- 관리자 비밀번호는 `SOURCE_SCOUT_PASSWORD` 환경변수에서만 읽는다.
+- 관리자 아이디와 비밀번호는 `SOURCE_SCOUT_USERNAME`, `SOURCE_SCOUT_PASSWORD` 환경변수에서만 읽는다.
 - 세션은 HMAC-SHA256으로 서명하며 서버에는 별도 세션 레코드를 저장하지 않는다.
 - 쿠키에는 `HttpOnly`, `SameSite=Lax`, HTTPS 환경의 `Secure` 속성을 사용한다.
 - 기본 세션 수명은 24시간이며 최소 허용값은 12시간이다.
