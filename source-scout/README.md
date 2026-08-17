@@ -33,6 +33,8 @@ python -m source_scout
 
 로그인 세션은 기본 24시간 유지됩니다. `SOURCE_SCOUT_SESSION_HOURS`로 변경할 수 있지만 12시간 미만은 허용하지 않습니다. 운영 서버에서는 `SOURCE_SCOUT_USERNAME`, `SOURCE_SCOUT_PASSWORD`, `SOURCE_SCOUT_SESSION_SECRET`을 반드시 환경변수로 설정하고 Git에 커밋하지 마세요.
 
+운영 서버에서는 `SOURCE_SCOUT_DATA_DIR`을 Git 저장소 밖의 영구 데이터 경로로 지정하세요. Oracle 배포 설정은 `deploy/` 폴더에 있습니다.
+
 ## 테스트
 
 ```powershell

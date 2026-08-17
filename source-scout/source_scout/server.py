@@ -19,7 +19,8 @@ from .scoring import SCORE_FIELDS, calculate_score, clamp_rating
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static"
-DB = Database(ROOT / "data" / "source_scout.db")
+DATA_DIR = Path(os.environ.get("SOURCE_SCOUT_DATA_DIR", str(ROOT / "data"))).expanduser()
+DB = Database(DATA_DIR / "source_scout.db")
 AUTH: SessionManager | None = None
 
 STATUSES = {"new", "reviewing", "permission_needed", "approved", "rejected"}

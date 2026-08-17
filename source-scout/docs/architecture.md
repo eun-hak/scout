@@ -16,6 +16,7 @@
 - 쿠키에는 `HttpOnly`, `SameSite=Lax`, HTTPS 환경의 `Secure` 속성을 사용한다.
 - 기본 세션 수명은 24시간이며 최소 허용값은 12시간이다.
 - 운영 환경의 서명 키는 `SOURCE_SCOUT_SESSION_SECRET`에 32자 이상으로 설정한다.
+- 운영 데이터베이스는 `SOURCE_SCOUT_DATA_DIR`을 통해 코드 배포 경로와 분리한다.
 
 ## 처리 흐름
 
