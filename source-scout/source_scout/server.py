@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import os
+import secrets
 import sqlite3
 import webbrowser
 from http import HTTPStatus
@@ -12,12 +13,14 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .analyzer import analyze_metadata
+from .auth import SessionManager
 from .database import Database
 from .scoring import SCORE_FIELDS, calculate_score, clamp_rating
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static"
 DB = Database(ROOT / "data" / "source_scout.db")
+AUTH: SessionManager | None = None
 
 STATUSES = {"new", "reviewing", "permission_needed", "approved", "rejected"}
 RIGHTS_STATUSES = {
@@ -83,6 +86,26 @@ class Handler(BaseHTTPRequestHandler):
     def send_error_json(self, message: str, status: int = 400) -> None:
         self.send_json({"error": message}, status)
 
+    def is_secure_request(self) -> bool:
+        return self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+
+    def is_authenticated(self) -> bool:
+        if AUTH is None:
+            return False
+        token = AUTH.token_from_cookie(self.headers.get("Cookie"))
+        return AUTH.validate(token)
+
+    def require_auth(self, api: bool = True) -> bool:
+        if self.is_authenticated():
+            return True
+        if api:
+            self.send_error_json("로그인이 필요합니다.", HTTPStatus.UNAUTHORIZED)
+        else:
+            self.send_response(HTTPStatus.SEE_OTHER)
+            self.send_header("Location", "/login")
+            self.end_headers()
+        return False
+
     def read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
         if length > 1_000_000:
@@ -101,6 +124,24 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/login":
+            if self.is_authenticated():
+                self.send_response(HTTPStatus.SEE_OTHER)
+                self.send_header("Location", "/")
+                self.end_headers()
+            else:
+                self.serve_static_file("login.html")
+            return
+        if parsed.path == "/api/health":
+            self.send_json({"status": "ok"})
+            return
+        if parsed.path == "/api/session":
+            self.send_json({"authenticated": self.is_authenticated()}, 200 if self.is_authenticated() else 401)
+            return
+        if parsed.path.startswith("/api/") and not self.require_auth():
+            return
+        if parsed.path == "/" and not self.require_auth(api=False):
+            return
         if parsed.path == "/api/candidates":
             query = parse_qs(parsed.query)
             candidates = DB.list_candidates(query.get("status", [""])[0], query.get("theme", [""])[0])
@@ -109,12 +150,17 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/export.csv":
             self.export_csv()
             return
-        if parsed.path == "/api/health":
-            self.send_json({"status": "ok"})
-            return
         self.serve_static(parsed.path)
 
     def do_POST(self) -> None:
+        if self.path == "/api/login":
+            self.login()
+            return
+        if self.path == "/api/logout":
+            self.logout()
+            return
+        if not self.require_auth():
+            return
         if self.path != "/api/candidates":
             self.send_error_json("경로를 찾을 수 없습니다.", 404)
             return
@@ -152,6 +198,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json(str(exc))
 
     def do_PATCH(self) -> None:
+        if not self.require_auth():
+            return
         candidate_id = self.parse_candidate_id()
         if candidate_id is None:
             return
@@ -172,6 +220,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json(str(exc))
 
     def do_DELETE(self) -> None:
+        if not self.require_auth():
+            return
         candidate_id = self.parse_candidate_id()
         if candidate_id is None:
             return
@@ -207,8 +257,44 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def login(self) -> None:
+        global AUTH
+        if AUTH is None:
+            self.send_error_json("로그인 설정이 준비되지 않았습니다.", 503)
+            return
+        try:
+            payload = self.read_json()
+        except ValueError as exc:
+            self.send_error_json(str(exc))
+            return
+        if not AUTH.verify_password(payload.get("password")):
+            self.send_error_json("비밀번호가 올바르지 않습니다.", HTTPStatus.UNAUTHORIZED)
+            return
+        token = AUTH.issue()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Set-Cookie", AUTH.cookie_header(token, self.is_secure_request()))
+        body = json.dumps({"authenticated": True, "expires_in": AUTH.lifetime_seconds}).encode("utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def logout(self) -> None:
+        global AUTH
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        if AUTH is not None:
+            self.send_header("Set-Cookie", AUTH.clear_cookie_header(self.is_secure_request()))
+        body = b'{"authenticated":false}'
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def serve_static(self, path: str) -> None:
         requested = "index.html" if path in {"", "/"} else path.lstrip("/")
+        self.serve_static_file(requested)
+
+    def serve_static_file(self, requested: str) -> None:
         target = (STATIC / requested).resolve()
         if STATIC.resolve() not in target.parents and target != STATIC.resolve():
             self.send_error_json("경로를 찾을 수 없습니다.", 404)
@@ -226,8 +312,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def run() -> None:
+    global AUTH
     host = os.environ.get("SOURCE_SCOUT_HOST", "127.0.0.1")
     port = int(os.environ.get("SOURCE_SCOUT_PORT", "8765"))
+    password = os.environ.get("SOURCE_SCOUT_PASSWORD", "")
+    session_secret = os.environ.get("SOURCE_SCOUT_SESSION_SECRET", "")
+    if not session_secret:
+        session_secret = secrets.token_urlsafe(48)
+        print("경고: SOURCE_SCOUT_SESSION_SECRET이 없어 임시 키를 사용합니다. 재시작하면 세션이 종료됩니다.")
+    session_hours = max(12, int(os.environ.get("SOURCE_SCOUT_SESSION_HOURS", "24")))
+    AUTH = SessionManager(password, session_secret, session_hours * 3600)
     server = ThreadingHTTPServer((host, port), Handler)
     url = f"http://{host}:{port}"
     print(f"Source Scout 실행 중: {url}")

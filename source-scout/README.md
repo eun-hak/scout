@@ -16,6 +16,8 @@ Python 3.11 이상만 필요하며 외부 패키지를 설치하지 않습니다
 
 ```powershell
 cd source-scout
+$env:SOURCE_SCOUT_PASSWORD = "충분히 긴 관리자 비밀번호"
+$env:SOURCE_SCOUT_SESSION_SECRET = "32자 이상의 무작위 비밀 문자열"
 python -m source_scout
 ```
 
@@ -27,6 +29,8 @@ python -m source_scout
 $env:SOURCE_SCOUT_PORT = "9000"
 python -m source_scout
 ```
+
+로그인 세션은 기본 24시간 유지됩니다. `SOURCE_SCOUT_SESSION_HOURS`로 변경할 수 있지만 12시간 미만은 허용하지 않습니다. 운영 서버에서는 `SOURCE_SCOUT_PASSWORD`와 `SOURCE_SCOUT_SESSION_SECRET`을 반드시 환경변수로 설정하고 Git에 커밋하지 마세요.
 
 ## 테스트
 

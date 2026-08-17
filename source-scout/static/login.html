@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Source Scout 로그인</title>
+  <style>
+    :root { --ink:#13211d; --paper:#f4f0e7; --panel:#fffdf7; --accent:#ff5b35; --green:#1d5a48; }
+    * { box-sizing:border-box; }
+    body { min-height:100vh; margin:0; display:grid; place-items:center; color:var(--ink); background:var(--green); font-family:system-ui,sans-serif; }
+    main { width:min(420px,90vw); padding:38px; background:var(--panel); border-radius:16px; box-shadow:0 24px 60px #07120e55; }
+    small { color:var(--accent); font-weight:800; letter-spacing:.15em; }
+    h1 { margin:8px 0; font:700 42px/.95 Georgia,serif; letter-spacing:-.04em; }
+    p { color:#64736d; line-height:1.55; }
+    label { display:grid; gap:8px; margin-top:28px; font-size:13px; font-weight:800; }
+    input { width:100%; padding:14px; border:1px solid #d8d3c8; border-radius:8px; font:inherit; }
+    button { width:100%; margin-top:16px; padding:13px; border:0; border-radius:999px; color:white; background:var(--accent); font-weight:800; cursor:pointer; }
+    #message { min-height:20px; margin-bottom:0; color:#a33; font-size:13px; }
+  </style>
+</head>
+<body>
+  <main>
+    <small>PRIVATE RESEARCH DESK</small>
+    <h1>Source Scout</h1>
+    <p>등록된 후보와 권리 정보를 보호하기 위해 관리자 비밀번호가 필요합니다.</p>
+    <form id="login-form">
+      <label>관리자 비밀번호<input name="password" type="password" autocomplete="current-password" autofocus required></label>
+      <button type="submit">로그인</button>
+      <p id="message"></p>
+    </form>
+  </main>
+  <script>
+    const form = document.querySelector('#login-form');
+    const message = document.querySelector('#message');
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      message.textContent = '확인 중...';
+      const password = new FormData(form).get('password');
+      const response = await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password})});
+      const body = await response.json().catch(() => ({}));
+      if (response.ok) location.replace('/');
+      else message.textContent = body.error || '로그인에 실패했습니다.';
+    });
+  </script>
+</body>
+</html>

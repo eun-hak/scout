@@ -4,6 +4,7 @@ const template = document.querySelector('#candidate-template');
 const message = document.querySelector('#form-message');
 const statusFilter = document.querySelector('#status-filter');
 const themeFilter = document.querySelector('#theme-filter');
+const logout = document.querySelector('#logout');
 
 const statuses = {
   new: '새 후보', reviewing: '검토 중', permission_needed: '허락 필요', approved: '승인', rejected: '제외'
@@ -25,6 +26,10 @@ function options(values, selected) {
 
 async function api(path, options = {}) {
   const response = await fetch(path, {headers: {'Content-Type': 'application/json'}, ...options});
+  if (response.status === 401) {
+    location.replace('/login');
+    throw new Error('로그인이 필요합니다.');
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({error: '요청에 실패했습니다.'}));
     throw new Error(body.error);
@@ -114,4 +119,8 @@ form.addEventListener('submit', async event => {
 });
 
 [statusFilter, themeFilter].forEach(filter => filter.addEventListener('change', loadCandidates));
+logout.addEventListener('click', async () => {
+  await fetch('/api/logout', {method: 'POST'});
+  location.replace('/login');
+});
 loadCandidates().catch(error => list.innerHTML = `<div class="empty">${error.message}</div>`);
