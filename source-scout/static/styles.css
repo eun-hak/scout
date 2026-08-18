@@ -74,6 +74,9 @@ summary { cursor: pointer; font-weight: 700; }
 .share-card h1 { margin-top:0; font:700 38px Georgia,serif; }
 .share-card form { display:grid; gap:16px; }
 .source-form { display:grid; grid-template-columns:1fr 1fr; align-items:end; gap:14px; margin-top:26px; }
+.site-footer { width:min(1180px,92vw); margin:-42px auto 36px; display:flex; align-items:center; justify-content:space-between; gap:18px; color:var(--muted); font-size:13px; }
+.site-footer nav { display:flex; flex-wrap:wrap; gap:16px; }
+.site-footer a { color:var(--green); font-weight:700; text-decoration:none; }
 @media (max-width: 720px) { .source-form { grid-template-columns:1fr; } }
 @media (max-width: 720px) {
   .hero, .section-title, .queue-heading { align-items: flex-start; flex-direction: column; }
@@ -84,4 +87,5 @@ summary { cursor: pointer; font-weight: 700; }
   .candidate-thumb { width:100%; height:200px; }
   .candidate-controls { align-items: stretch; flex-direction: column; }
   .text-button { margin-left: 0; }
+  .site-footer { align-items:flex-start; flex-direction:column; }
 }

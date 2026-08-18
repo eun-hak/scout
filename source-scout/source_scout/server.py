@@ -215,6 +215,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        public_pages = {
+            "/privacy": "privacy.html",
+            "/terms": "terms.html",
+            "/data-deletion": "data-deletion.html",
+        }
+        if parsed.path in public_pages:
+            self.serve_static_file(public_pages[parsed.path])
+            return
         if parsed.path == "/share":
             self.serve_static_file("share.html")
             return

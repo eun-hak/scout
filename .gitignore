@@ -5,4 +5,4 @@ __pycache__/
 source-scout/data/*.db
 source-scout/data/*.db-*
 source-scout/exports/
-
+source-scout/.env
