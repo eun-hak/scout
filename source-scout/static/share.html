@@ -1,46 +1,51 @@
 <!doctype html>
 <html lang="ko">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#1d5a48">
-  <link rel="manifest" href="/manifest.webmanifest">
-  <title>Source Scout에 공유</title>
-  <link rel="stylesheet" href="/styles.css">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1d5a48"><link rel="manifest" href="/manifest.webmanifest">
+  <title>Scout에 영상 담기</title><link rel="stylesheet" href="/styles.css">
 </head>
 <body class="share-page">
-  <main class="share-card">
-    <p class="eyebrow">MOBILE INBOX</p>
-    <h1>후보 등록</h1>
-    <form id="share-form">
-      <label>공유 URL<input name="url" type="url" required></label>
-      <label>가제<input name="title" required></label>
-      <label>공유 메모<textarea name="description"></textarea></label>
-      <button class="button" type="submit">Source Scout에 저장</button>
-      <p id="share-message"></p>
-    </form>
+  <main class="share-shell">
+    <header class="share-brand"><span class="share-logo" aria-hidden="true">S</span><div><strong>Source Scout</strong><small>나만의 쇼츠 소재 보관함</small></div><a href="/">보관함</a></header>
+    <section class="share-card" id="capture-view">
+      <div class="share-step"><span>1</span><b></b><i>2</i><b></b><i>3</i></div>
+      <p class="eyebrow">QUICK CAPTURE</p><h1>이 영상을<br>소재로 담을까요?</h1>
+      <p class="share-lead">원본 링크를 보관하고 중복을 확인한 뒤, 쇼츠 소재 적합도를 자동으로 분석합니다.</p>
+      <div class="shared-link" id="shared-link"><span class="platform-mark">IG</span><div><strong id="shared-host">Instagram 영상</strong><small id="shared-url">공유 링크 확인 중</small></div><span class="link-check">✓</span></div>
+      <form id="share-form">
+        <input name="url" type="url" required hidden><input name="title" value="모바일 공유 후보" hidden>
+        <fieldset><legend>왜 눈에 띄었나요? <small>선택 사항</small></legend><div class="reason-chips">
+          <button type="button" data-reason="첫 장면이 강함">⚡ 첫 장면</button><button type="button" data-reason="과정이 흥미로움">🛠 과정</button><button type="button" data-reason="반전이 있음">↗ 반전</button><button type="button" data-reason="감정 반응을 유도함">♥ 감정</button><button type="button" data-reason="정보 가치가 있음">✦ 정보</button>
+        </div></fieldset>
+        <label class="share-note">한 줄 메모 <small>선택 사항</small><textarea name="description" maxlength="500" placeholder="예: 첫 2초의 기계 움직임이 훅으로 좋음"></textarea></label>
+        <div class="share-warning"><span>ⓘ</span><p><strong>저장은 사용 허락을 의미하지 않습니다.</strong> 제작 전 원작자와 라이선스를 별도로 확인하세요.</p></div>
+        <button class="button share-submit" type="submit"><span>보관하고 자동 분석</span><b>→</b></button><p class="share-error" id="share-error" role="alert"></p>
+      </form>
+    </section>
+    <section class="share-card share-progress" id="progress-view" hidden aria-live="polite">
+      <div class="share-step done"><span>✓</span><b></b><span>2</span><b></b><i>3</i></div><div class="analysis-orbit"><span>S</span></div>
+      <h1>소재를 살펴보고 있어요</h1><p>링크를 닫아도 저장은 계속됩니다.</p>
+      <ol class="progress-list"><li class="active">원본 링크와 중복 확인</li><li>제목·설명 정보 수집</li><li>쇼츠 소재 적합도 계산</li></ol>
+    </section>
+    <section class="share-card share-success" id="result-view" hidden aria-live="polite">
+      <div class="share-step done"><span>✓</span><b></b><span>✓</span><b></b><span>✓</span></div><div class="success-mark">✓</div>
+      <p class="eyebrow" id="result-eyebrow">CAPTURED</p><h1 id="result-title">보관함에 담았어요</h1><p id="result-copy">나중에 자세히 검토할 수 있습니다.</p>
+      <div class="result-score"><div><strong id="result-score">–</strong><small>/100 소재 점수</small></div><div><span>추천 테마</span><strong id="result-theme">분석 중</strong></div></div>
+      <div class="result-actions"><a class="button" id="original-link" target="_blank" rel="noreferrer">Instagram으로 돌아가기</a><a class="button secondary" href="/?status=new">보관함에서 보기</a></div>
+    </section>
+    <footer class="share-footer">추천은 Instagram이, 선택과 권리 확인은 사람이 합니다.</footer>
   </main>
   <script>
-    const params = new URLSearchParams(location.search);
-    const form = document.querySelector('#share-form');
-    const text = params.get('text') || '';
-    const sharedUrl = params.get('url') || (text.match(/https?:\/\/\S+/) || [''])[0];
-    form.url.value = sharedUrl;
-    form.title.value = params.get('title') || '모바일 공유 후보';
-    form.description.value = text.replace(sharedUrl, '').trim();
-    form.addEventListener('submit', async event => {
-      event.preventDefault();
-      const message = document.querySelector('#share-message');
-      message.textContent = '저장 중...';
-      const payload = {...Object.fromEntries(new FormData(form)), auto_analyze:true, rights_status:'unknown'};
-      const response = await fetch('/api/mobile-share', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
-      if (response.status === 401) {
-        location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
-        return;
-      }
-      const body = await response.json().catch(() => ({}));
-      message.textContent = response.ok ? `등록 완료 · ${body.theme} · ${body.total_score}점` : body.error || '등록에 실패했습니다.';
-    });
+    const params=new URLSearchParams(location.search),form=document.querySelector('#share-form'),captureView=document.querySelector('#capture-view'),progressView=document.querySelector('#progress-view'),resultView=document.querySelector('#result-view'),errorMessage=document.querySelector('#share-error');
+    const rawText=[params.get('url'),params.get('text')].filter(Boolean).join(' '),urlMatch=rawText.match(/https?:\/\/[^\s<>"']+/i),sharedUrl=(urlMatch?.[0]||'').replace(/[),.;!?]+$/,''),cleanText=(params.get('text')||'').replace(urlMatch?.[0]||'','').trim(),selectedReasons=new Set();
+    function show(view){[captureView,progressView,resultView].forEach(item=>item.hidden=item!==view);scrollTo({top:0,behavior:'smooth'});}
+    function describeLink(value){try{const url=new URL(value),instagram=url.hostname.includes('instagram.com');document.querySelector('#shared-host').textContent=instagram?'Instagram Reel · 원본 링크':`${url.hostname} · 원본 링크`;document.querySelector('#shared-url').textContent=`${url.hostname}${url.pathname}`;document.querySelector('.platform-mark').textContent=instagram?'IG':'URL';}catch{document.querySelector('#shared-link').classList.add('invalid');document.querySelector('#shared-host').textContent='공유 링크가 없습니다';document.querySelector('#shared-url').textContent='Instagram의 공유 버튼에서 Scout를 선택하세요.';errorMessage.textContent='영상 링크를 찾지 못했습니다.';}}
+    form.url.value=sharedUrl;form.title.value='모바일 공유 후보';form.description.value=cleanText;describeLink(sharedUrl);
+    document.querySelectorAll('[data-reason]').forEach(button=>button.addEventListener('click',()=>{const reason=button.dataset.reason;button.classList.toggle('selected');button.setAttribute('aria-pressed',button.classList.contains('selected'));button.classList.contains('selected')?selectedReasons.add(reason):selectedReasons.delete(reason);}));
+    function advanceProgress(step){document.querySelectorAll('.progress-list li').forEach((item,index)=>{item.classList.toggle('active',index===step);item.classList.toggle('complete',index<step);});}
+    function renderResult(candidate,duplicate=false){const item=candidate||{};document.querySelector('#result-eyebrow').textContent=duplicate?'ALREADY CAPTURED':'CAPTURED';document.querySelector('#result-title').textContent=duplicate?'이미 보관함에 있어요':'보관함에 담았어요';document.querySelector('#result-copy').textContent=duplicate?'중복 저장하지 않고 기존 후보를 유지했습니다.':'메타데이터 분석을 마쳤습니다. 제작 전 권리 상태를 확인하세요.';document.querySelector('#result-score').textContent=Number.isFinite(Number(item.total_score))?Math.round(item.total_score):'–';document.querySelector('#result-theme').textContent=item.theme||'미분류';document.querySelector('#original-link').href=item.url||sharedUrl;show(resultView);}
+    form.addEventListener('submit',async event=>{event.preventDefault();if(!sharedUrl)return;errorMessage.textContent='';const note=form.description.value.trim(),reasons=[...selectedReasons],description=[reasons.length?`선택 이유: ${reasons.join(', ')}`:'',note].filter(Boolean).join('\n'),payload={url:sharedUrl,title:form.title.value,description,auto_analyze:true,rights_status:'unknown'};show(progressView);advanceProgress(0);const timerOne=setTimeout(()=>advanceProgress(1),450),timerTwo=setTimeout(()=>advanceProgress(2),1050);try{const response=await fetch('/api/mobile-share',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});if(response.status===401){location.href=`/login?next=${encodeURIComponent(location.pathname+location.search)}`;return;}const body=await response.json().catch(()=>({}));if(response.status===409&&body.duplicate){renderResult(body.candidate,true);return;}if(!response.ok)throw new Error(body.error||'저장하지 못했습니다. 잠시 후 다시 시도해 주세요.');renderResult(body);}catch(error){show(captureView);errorMessage.textContent=navigator.onLine?error.message:'인터넷 연결을 확인한 뒤 다시 시도해 주세요.';}finally{clearTimeout(timerOne);clearTimeout(timerTwo);}});
     navigator.serviceWorker?.register('/service-worker.js');
   </script>
 </body>

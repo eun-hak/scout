@@ -121,6 +121,11 @@ class Database:
             row = connection.execute("SELECT * FROM candidates WHERE id = ?", (candidate_id,)).fetchone()
             return dict(row) if row else None
 
+    def get_candidate_by_url(self, url: str) -> dict | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM candidates WHERE url = ?", (url,)).fetchone()
+            return dict(row) if row else None
+
     def create_candidate(self, data: dict) -> dict:
         fields = tuple(data.keys())
         placeholders = ", ".join("?" for _ in fields)

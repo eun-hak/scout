@@ -6,6 +6,18 @@ from source_scout.database import Database
 
 
 class DatabaseTests(unittest.TestCase):
+    def test_candidate_can_be_found_by_url_for_duplicate_feedback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Database(Path(directory) / "test.db")
+            created = database.create_candidate({
+                "url": "https://www.instagram.com/reel/example/",
+                "platform": "instagram",
+                "title": "Shared reel",
+            })
+            found = database.get_candidate_by_url(created["url"])
+            self.assertEqual(found["id"], created["id"])
+            self.assertIsNone(database.get_candidate_by_url("https://example.com/missing"))
+
     def test_mobile_token_lifecycle(self):
         with tempfile.TemporaryDirectory() as directory:
             database = Database(Path(directory) / "test.db")

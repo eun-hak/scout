@@ -62,7 +62,12 @@
     </section>
 
     <section class="panel">
-      <div class="section-title"><div><span>03</span><h2>모바일 연결</h2></div><p>iPhone 단축어나 외부 기기에서 사용할 토큰입니다.</p></div>
+      <div class="section-title"><div><span>03</span><h2>Instagram에서 바로 담기</h2></div><p>추천 피드는 그대로 보고, 발견한 영상만 Scout로 한 번에 넘기세요.</p></div>
+      <div class="mobile-share-guide">
+        <div class="guide-copy"><span class="guide-badge">권장 · Android</span><h3>공유 메뉴에 Scout를 추가하세요</h3><p>홈 화면에 앱을 설치하면 Instagram의 공유 목록에서 <strong>Scout</strong>를 선택할 수 있습니다. 링크 확인, 중복 제거, 소재 점수화까지 자동으로 이어집니다.</p><button class="button" id="install-app-guide" type="button" hidden>Scout 앱 설치</button></div>
+        <ol class="guide-steps"><li><b>1</b><span><strong>Instagram에서 발견</strong><small><code>lay_on_g</code> 계정으로 돋보기·릴스를 탐색</small></span></li><li><b>2</b><span><strong>공유 → Scout</strong><small>눈에 띈 이유와 메모만 선택</small></span></li><li><b>3</b><span><strong>자동 보관·분석</strong><small>중복 확인 후 검토 대기열에 저장</small></span></li></ol>
+      </div>
+      <details class="mobile-help"><summary>공유 목록에 Scout가 안 보이나요?</summary><p><strong>Android Chrome:</strong> 위 설치 버튼 또는 브라우저 메뉴의 ‘홈 화면에 추가’를 누른 뒤 Instagram을 다시 실행하세요.</p><p><strong>iPhone:</strong> 현재는 Instagram에서 ‘링크 복사’ 후 설치한 Scout를 열어 새 후보 등록에 붙여 넣는 방식이 가장 안정적입니다.</p><p>추천 피드는 Meta API가 제공하지 않으므로, 개인화 추천은 Instagram에서 보고 선별 이후 과정만 자동화합니다.</p></details>
       <div class="token-actions"><button class="button" id="create-token" type="button">기기 토큰 만들기</button><code id="new-token" hidden></code></div>
       <div id="token-list" class="token-list"></div>
     </section>

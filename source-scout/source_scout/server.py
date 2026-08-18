@@ -386,11 +386,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error_json("경로를 찾을 수 없습니다.", 404)
 
     def create_candidate_request(self, source: str) -> None:
+        payload: dict = {}
         try:
             payload = self.read_json()
             self.send_json(candidate_from_payload(payload, source), HTTPStatus.CREATED)
         except sqlite3.IntegrityError:
-            self.send_error_json("이미 등록된 URL입니다.", HTTPStatus.CONFLICT)
+            existing = None
+            try:
+                existing = DB.get_candidate_by_url(canonicalize_url(validate_url(payload.get("url"))))
+            except ValueError:
+                pass
+            self.send_json({
+                "error": "이미 보관함에 있는 영상입니다.",
+                "duplicate": True,
+                "candidate": existing,
+            }, HTTPStatus.CONFLICT)
         except ValueError as exc:
             self.send_error_json(str(exc))
 

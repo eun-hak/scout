@@ -6,6 +6,7 @@ const statusFilter = document.querySelector('#status-filter');
 const themeFilter = document.querySelector('#theme-filter');
 const logout = document.querySelector('#logout');
 const installButton = document.querySelector('#install-app');
+const installGuideButton = document.querySelector('#install-app-guide');
 const tokenList = document.querySelector('#token-list');
 const newToken = document.querySelector('#new-token');
 const sourceForm = document.querySelector('#source-form');
@@ -17,6 +18,14 @@ const instagramResults = document.querySelector('#instagram-results');
 const instagramResultTemplate = document.querySelector('#instagram-result-template');
 let installPrompt;
 let instagramItems = [];
+
+const initialFilters = new URLSearchParams(location.search);
+if (initialFilters.get('status')) statusFilter.value = initialFilters.get('status');
+if (initialFilters.get('theme')) themeFilter.value = initialFilters.get('theme');
+
+function setInstallButtons(visible) {
+  [installButton, installGuideButton].filter(Boolean).forEach(button => button.hidden = !visible);
+}
 
 const metaResult = new URLSearchParams(location.search).get('meta');
 if (metaResult) {
@@ -315,13 +324,15 @@ instagramSearchForm.addEventListener('submit', async event => {
 window.addEventListener('beforeinstallprompt', event => {
   event.preventDefault();
   installPrompt = event;
-  installButton.hidden = false;
+  setInstallButtons(true);
 });
-installButton.addEventListener('click', async () => {
-  await installPrompt?.prompt();
+async function promptInstall() {
+  if (!installPrompt) return;
+  await installPrompt.prompt();
   installPrompt = null;
-  installButton.hidden = true;
-});
+  setInstallButtons(false);
+}
+[installButton, installGuideButton].filter(Boolean).forEach(button => button.addEventListener('click', promptInstall));
 logout.addEventListener('click', async () => {
   await fetch('/api/logout', {method: 'POST'});
   location.replace('/login');
