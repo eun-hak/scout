@@ -99,6 +99,7 @@ https://www.youtube.com/feeds/videos.xml?channel_id=채널_ID
 SOURCE_SCOUT_PUBLIC_URL=https://scout.jisiknarae.com
 SOURCE_SCOUT_META_APP_ID=Meta 앱 ID
 SOURCE_SCOUT_META_APP_SECRET=Meta 앱 시크릿
+SOURCE_SCOUT_META_CONFIG_ID=비즈니스 로그인 구성 ID
 ```
 
 Meta 앱의 유효한 OAuth 리디렉션 URI에는 다음 주소를 등록합니다.

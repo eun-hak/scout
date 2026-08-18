@@ -474,13 +474,18 @@ class Handler(BaseHTTPRequestHandler):
                 META_OAUTH_STATES.pop(state, None)
         state = secrets.token_urlsafe(32)
         META_OAUTH_STATES[state] = now + 600
-        query = urlencode({
+        params = {
             "client_id": app_id,
             "redirect_uri": redirect_uri,
             "state": state,
             "response_type": "code",
             "scope": "instagram_basic,pages_show_list,pages_read_engagement,business_management",
-        })
+        }
+        config_id = os.environ.get("SOURCE_SCOUT_META_CONFIG_ID", "").strip()
+        if config_id:
+            params["config_id"] = config_id
+            params["override_default_response_type"] = "true"
+        query = urlencode(params)
         self.redirect(f"https://www.facebook.com/v26.0/dialog/oauth?{query}")
 
     def meta_callback(self, parsed) -> None:
