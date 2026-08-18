@@ -1,4 +1,4 @@
-const CACHE = 'source-scout-v1';
+const CACHE = 'source-scout-v2';
 const ASSETS = ['/login', '/share', '/styles.css', '/app.js', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', event => {

@@ -8,11 +8,12 @@ import os
 import secrets
 import sqlite3
 import threading
+import time
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from .analyzer import analyze_metadata
 from .analysis_provider import analyze_candidate
@@ -20,6 +21,7 @@ from .auth import SessionManager
 from .database import Database
 from .discovery import fetch_feed
 from .metadata import canonicalize_url, ensure_public_url, fetch_metadata
+from .meta_api import MetaAPIError, exchange_code, exchange_long_lived_token, inspect_connection, inspect_scopes, revoke_permissions, search_hashtag
 from .scoring import SCORE_FIELDS, calculate_score, clamp_rating
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -27,6 +29,7 @@ STATIC = ROOT / "static"
 DATA_DIR = Path(os.environ.get("SOURCE_SCOUT_DATA_DIR", str(ROOT / "data"))).expanduser()
 DB = Database(DATA_DIR / "source_scout.db")
 AUTH: SessionManager | None = None
+META_OAUTH_STATES: dict[str, float] = {}
 
 STATUSES = {"new", "reviewing", "permission_needed", "approved", "rejected"}
 RIGHTS_STATUSES = {
@@ -109,7 +112,7 @@ def candidate_from_payload(payload: dict, source: str) -> dict:
         "theme": str(data.get("theme") or payload.get("theme") or "직업·공정").strip(),
         "status": str(payload.get("status") or "new"),
         "rights_status": str(payload.get("rights_status") or "unknown"),
-        "source": "browser_extension" if payload.get("source") == "browser_extension" else source,
+        "source": payload.get("source") if payload.get("source") in {"browser_extension", "instagram_api"} else source,
         "thumbnail_url": thumbnail_url,
     })
     if description and not data.get("notes"):
@@ -166,6 +169,32 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_error_json(self, message: str, status: int = 400) -> None:
         self.send_json({"error": message}, status)
+
+    def redirect(self, location: str) -> None:
+        self.send_response(HTTPStatus.SEE_OTHER)
+        self.send_header("Location", location)
+        self.end_headers()
+
+    def meta_settings(self) -> tuple[str, str, str]:
+        app_id = os.environ.get("SOURCE_SCOUT_META_APP_ID", "").strip()
+        app_secret = os.environ.get("SOURCE_SCOUT_META_APP_SECRET", "").strip()
+        public_url = os.environ.get("SOURCE_SCOUT_PUBLIC_URL", "http://127.0.0.1:8765").strip().rstrip("/")
+        if not app_id or not app_secret:
+            raise ValueError("Meta 앱 ID와 시크릿이 설정되지 않았습니다.")
+        return app_id, app_secret, f"{public_url}/api/meta/callback"
+
+    def ensure_meta_connection(self) -> dict | None:
+        connection = DB.get_meta_connection(include_tokens=True)
+        if connection:
+            return connection
+        token = os.environ.get("SOURCE_SCOUT_META_USER_ACCESS_TOKEN", "").strip()
+        if not token:
+            return None
+        details = inspect_connection(token)
+        app_id, app_secret, _ = self.meta_settings()
+        details["scopes"] = ",".join(inspect_scopes(token, f"{app_id}|{app_secret}"))
+        DB.save_meta_connection(details)
+        return DB.get_meta_connection(include_tokens=True)
 
     def is_secure_request(self) -> bool:
         return self.headers.get("X-Forwarded-Proto", "").lower() == "https"
@@ -240,6 +269,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/session":
             self.send_json({"authenticated": self.is_authenticated()}, 200 if self.is_authenticated() else 401)
             return
+        if parsed.path == "/api/meta/callback":
+            self.meta_callback(parsed)
+            return
         if parsed.path.startswith("/api/") and not self.require_auth():
             return
         if parsed.path == "/" and not self.require_auth(api=False):
@@ -254,6 +286,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/discovery-sources":
             self.send_json({"items": DB.list_discovery_sources()})
+            return
+        if parsed.path == "/api/meta/status":
+            try:
+                connection = self.ensure_meta_connection()
+                public = DB.get_meta_connection(include_tokens=False) if connection else None
+                self.send_json({"configured": bool(os.environ.get("SOURCE_SCOUT_META_APP_ID")), "connected": bool(public), "connection": public})
+            except (MetaAPIError, ValueError) as exc:
+                self.send_json({"configured": True, "connected": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/meta/connect":
+            self.meta_connect()
             return
         if parsed.path == "/api/export.csv":
             self.export_csv()
@@ -298,6 +341,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error_json("이미 등록된 피드입니다.", HTTPStatus.CONFLICT)
             except ValueError as exc:
                 self.send_error_json(str(exc))
+            return
+        if self.path == "/api/meta/hashtag-search":
+            self.meta_hashtag_search()
             return
         if self.path.startswith("/api/discovery-sources/") and self.path.endswith("/run"):
             try:
@@ -373,6 +419,16 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self) -> None:
         if not self.require_auth():
             return
+        if urlparse(self.path).path == "/api/meta/connection":
+            connection = DB.delete_meta_connection()
+            if connection:
+                try:
+                    revoke_permissions(connection["user_access_token"])
+                except MetaAPIError:
+                    pass
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.end_headers()
+            return
         if urlparse(self.path).path.startswith("/api/mobile-tokens/"):
             try:
                 token_id = int(urlparse(self.path).path.rsplit("/", 1)[1])
@@ -405,6 +461,76 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
         else:
             self.send_error_json("후보를 찾을 수 없습니다.", 404)
+
+    def meta_connect(self) -> None:
+        try:
+            app_id, _, redirect_uri = self.meta_settings()
+        except ValueError as exc:
+            self.send_error_json(str(exc), 503)
+            return
+        now = time.time()
+        for state, expires_at in list(META_OAUTH_STATES.items()):
+            if expires_at < now:
+                META_OAUTH_STATES.pop(state, None)
+        state = secrets.token_urlsafe(32)
+        META_OAUTH_STATES[state] = now + 600
+        query = urlencode({
+            "client_id": app_id,
+            "redirect_uri": redirect_uri,
+            "state": state,
+            "response_type": "code",
+            "scope": "instagram_basic,pages_show_list,pages_read_engagement,business_management",
+        })
+        self.redirect(f"https://www.facebook.com/v26.0/dialog/oauth?{query}")
+
+    def meta_callback(self, parsed) -> None:
+        if not self.is_authenticated():
+            self.redirect("/login")
+            return
+        query = parse_qs(parsed.query)
+        if query.get("error"):
+            self.redirect("/?meta=cancelled")
+            return
+        state = query.get("state", [""])[0]
+        code = query.get("code", [""])[0]
+        expires_at = META_OAUTH_STATES.pop(state, 0)
+        if not state or not code or expires_at < time.time():
+            self.redirect("/?meta=invalid_state")
+            return
+        try:
+            app_id, app_secret, redirect_uri = self.meta_settings()
+            short_lived_token = exchange_code(app_id, app_secret, redirect_uri, code)
+            token = exchange_long_lived_token(app_id, app_secret, short_lived_token)
+            details = inspect_connection(token)
+            details["scopes"] = ",".join(inspect_scopes(token, f"{app_id}|{app_secret}"))
+            DB.save_meta_connection(details)
+            self.redirect("/?meta=connected")
+        except (MetaAPIError, ValueError):
+            self.redirect("/?meta=error")
+
+    def meta_hashtag_search(self) -> None:
+        try:
+            payload = self.read_json()
+            hashtag = str(payload.get("hashtag") or "").strip().lstrip("#")
+            if not hashtag or len(hashtag) > 100 or not hashtag.replace("_", "").isalnum():
+                raise ValueError("문자와 숫자로 된 해시태그를 입력하세요.")
+            connection = self.ensure_meta_connection()
+            if not connection:
+                self.send_error_json("먼저 Meta 계정을 연결하세요.", HTTPStatus.CONFLICT)
+                return
+            items = search_hashtag(connection, hashtag, int(payload.get("limit") or 24))
+            self.send_json({"hashtag": hashtag, "items": items, "count": len(items)})
+        except ValueError as exc:
+            self.send_error_json(str(exc))
+        except MetaAPIError as exc:
+            if exc.code == 10:
+                self.send_json({
+                    "error": "Meta 앱 검수가 필요합니다.",
+                    "review_required": True,
+                    "detail": str(exc),
+                }, HTTPStatus.FORBIDDEN)
+            else:
+                self.send_error_json(str(exc), HTTPStatus.BAD_GATEWAY)
 
     def parse_candidate_id(self) -> int | None:
         parts = urlparse(self.path).path.strip("/").split("/")

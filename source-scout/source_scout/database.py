@@ -55,6 +55,18 @@ CREATE TABLE IF NOT EXISTS discovery_sources (
     last_checked_at TEXT,
     last_error TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS meta_connection (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    user_access_token TEXT NOT NULL,
+    page_access_token TEXT NOT NULL,
+    page_id TEXT NOT NULL,
+    page_name TEXT NOT NULL,
+    ig_user_id TEXT NOT NULL,
+    ig_username TEXT NOT NULL DEFAULT '',
+    scopes TEXT NOT NULL DEFAULT '',
+    connected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -203,3 +215,37 @@ class Database:
                 "UPDATE discovery_sources SET last_checked_at = CURRENT_TIMESTAMP, last_error = ? WHERE id = ?",
                 (error[:1000], source_id),
             )
+
+    def save_meta_connection(self, data: dict) -> dict:
+        fields = (
+            "user_access_token", "page_access_token", "page_id", "page_name",
+            "ig_user_id", "ig_username", "scopes",
+        )
+        values = tuple(str(data.get(field) or "") for field in fields)
+        with self.connect() as connection:
+            connection.execute(
+                f"""
+                INSERT INTO meta_connection (id, {', '.join(fields)})
+                VALUES (1, {', '.join('?' for _ in fields)})
+                ON CONFLICT(id) DO UPDATE SET
+                    {', '.join(f'{field} = excluded.{field}' for field in fields)},
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                values,
+            )
+        return self.get_meta_connection(include_tokens=False)  # type: ignore[return-value]
+
+    def get_meta_connection(self, include_tokens: bool = False) -> dict | None:
+        public_fields = "page_id, page_name, ig_user_id, ig_username, scopes, connected_at, updated_at"
+        fields = "*" if include_tokens else public_fields
+        with self.connect() as connection:
+            row = connection.execute(f"SELECT {fields} FROM meta_connection WHERE id = 1").fetchone()
+            return dict(row) if row else None
+
+    def delete_meta_connection(self) -> dict | None:
+        current = self.get_meta_connection(include_tokens=True)
+        if not current:
+            return None
+        with self.connect() as connection:
+            connection.execute("DELETE FROM meta_connection WHERE id = 1")
+        return current

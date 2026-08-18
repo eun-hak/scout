@@ -22,6 +22,8 @@ $env:SOURCE_SCOUT_SESSION_SECRET = "32자 이상의 무작위 비밀 문자열"
 python -m source_scout
 ```
 
+프로젝트 루트의 Git 제외 파일 `.env`도 자동으로 읽습니다. 운영 비밀정보는 Git에 커밋하지 마세요.
+
 브라우저에서 <http://127.0.0.1:8765>를 여세요.
 
 다른 포트를 사용하려면:
@@ -88,6 +90,24 @@ YouTube 채널 피드 형식:
 ```text
 https://www.youtube.com/feeds/videos.xml?channel_id=채널_ID
 ```
+
+## Meta Instagram API 연결
+
+다음 환경변수를 설정하면 대시보드에서 Meta 계정 연결과 Instagram 공개 해시태그 탐색을 사용할 수 있습니다.
+
+```text
+SOURCE_SCOUT_PUBLIC_URL=https://scout.jisiknarae.com
+SOURCE_SCOUT_META_APP_ID=Meta 앱 ID
+SOURCE_SCOUT_META_APP_SECRET=Meta 앱 시크릿
+```
+
+Meta 앱의 유효한 OAuth 리디렉션 URI에는 다음 주소를 등록합니다.
+
+```text
+https://scout.jisiknarae.com/api/meta/callback
+```
+
+Instagram 공개 해시태그 검색은 Meta의 `Instagram Public Content Access` 앱 검수 승인이 필요합니다. 연결된 토큰은 API 응답이나 화면에 노출하지 않으며, 연결 해제 시 서버 저장본 삭제와 Meta 권한 취소를 시도합니다.
 
 ## 영상 분석 서버 연결
 

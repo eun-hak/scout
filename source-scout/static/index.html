@@ -68,7 +68,18 @@
     </section>
 
     <section class="panel">
-      <div class="section-title"><div><span>04</span><h2>자동 탐색 소스</h2></div><p>YouTube 채널·Reddit·일반 RSS/Atom 피드를 매시간 확인합니다.</p></div>
+      <div class="section-title"><div><span>04</span><h2>Instagram 공개 콘텐츠 탐색</h2></div><p>직접 입력한 해시태그로 공개 게시물을 찾고 원본 링크와 권리 상태를 검토합니다.</p></div>
+      <div class="meta-connection" id="meta-connection"><p class="muted">Meta 연결 상태를 확인하고 있습니다.</p></div>
+      <form id="instagram-search-form" class="instagram-search-form" hidden>
+        <label>해시태그<input name="hashtag" required maxlength="100" placeholder="woodworking" autocomplete="off"></label>
+        <button class="button" type="submit">공개 게시물 검색</button>
+      </form>
+      <div id="instagram-search-message" class="search-message"></div>
+      <div id="instagram-results" class="instagram-results"></div>
+    </section>
+
+    <section class="panel">
+      <div class="section-title"><div><span>05</span><h2>자동 탐색 소스</h2></div><p>YouTube 채널·Reddit·일반 RSS/Atom 피드를 매시간 확인합니다.</p></div>
       <form id="source-form" class="source-form">
         <label>이름<input name="label" required placeholder="장인 영상 채널"></label>
         <label class="wide">피드 URL<input name="feed_url" type="url" required placeholder="https://www.youtube.com/feeds/videos.xml?channel_id=..."></label>
@@ -95,6 +106,17 @@
           <button class="text-button analyze" type="button">자동 재분석</button>
           <button class="text-button delete" type="button">삭제</button>
         </div>
+      </div>
+    </article>
+  </template>
+  <template id="instagram-result-template">
+    <article class="instagram-result">
+      <img alt="" loading="lazy">
+      <div class="instagram-result-body">
+        <div class="instagram-result-meta"><strong class="instagram-creator"></strong><span class="instagram-type"></span></div>
+        <p class="instagram-caption"></p>
+        <small class="instagram-engagement"></small>
+        <div class="instagram-result-actions"><a target="_blank" rel="noreferrer">Instagram 원본 열기 ↗</a><button class="button save-instagram-result" type="button">후보로 저장</button></div>
       </div>
     </article>
   </template>

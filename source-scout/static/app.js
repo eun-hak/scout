@@ -10,7 +10,25 @@ const tokenList = document.querySelector('#token-list');
 const newToken = document.querySelector('#new-token');
 const sourceForm = document.querySelector('#source-form');
 const sourceList = document.querySelector('#source-list');
+const metaConnection = document.querySelector('#meta-connection');
+const instagramSearchForm = document.querySelector('#instagram-search-form');
+const instagramSearchMessage = document.querySelector('#instagram-search-message');
+const instagramResults = document.querySelector('#instagram-results');
+const instagramResultTemplate = document.querySelector('#instagram-result-template');
 let installPrompt;
+let instagramItems = [];
+
+const metaResult = new URLSearchParams(location.search).get('meta');
+if (metaResult) {
+  const messages = {
+    connected:'Meta 계정 연결을 완료했습니다.',
+    cancelled:'Meta 연결을 취소했습니다.',
+    invalid_state:'Meta 연결 요청이 만료되었습니다. 다시 시도해주세요.',
+    error:'Meta 연결 처리 중 오류가 발생했습니다.'
+  };
+  history.replaceState({}, '', location.pathname);
+  setTimeout(() => alert(messages[metaResult] || 'Meta 연결 상태가 변경되었습니다.'), 0);
+}
 
 const statuses = {
   new: '새 후보', reviewing: '검토 중', permission_needed: '허락 필요', approved: '승인', rejected: '제외'
@@ -38,7 +56,9 @@ async function api(path, options = {}) {
   }
   if (!response.ok) {
     const body = await response.json().catch(() => ({error: '요청에 실패했습니다.'}));
-    throw new Error(body.error);
+    const error = new Error(body.error);
+    error.body = body;
+    throw error;
   }
   return response.status === 204 ? null : response.json();
 }
@@ -69,6 +89,77 @@ async function loadSources() {
   sourceList.innerHTML = data.items.length ? data.items.map(item => `
     <div class="token-row"><div><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.theme)} · ${escapeHtml(item.feed_url)}${item.last_checked_at ? ` · 확인 ${item.last_checked_at}` : ''}${item.last_error ? ` · 오류 ${escapeHtml(item.last_error)}` : ''}</small></div>
     <div><button class="text-button" data-run-source="${item.id}" type="button">지금 확인</button><button class="text-button" data-delete-source="${item.id}" type="button">삭제</button></div></div>`).join('') : '<p class="muted">등록된 자동 탐색 소스가 없습니다.</p>';
+}
+
+async function loadMetaStatus() {
+  const data = await api('/api/meta/status');
+  instagramSearchForm.hidden = !data.connected;
+  if (!data.configured) {
+    metaConnection.innerHTML = '<p class="muted">서버에 Meta 앱 설정이 필요합니다.</p>';
+    return;
+  }
+  if (!data.connected) {
+    metaConnection.innerHTML = `<div class="meta-connection-row"><div><strong>Meta 계정이 연결되지 않았습니다.</strong><small>${escapeHtml(data.error || 'Facebook 페이지와 Instagram 프로페셔널 계정을 연결하세요.')}</small></div><a class="button" href="/api/meta/connect">Meta 계정 연결</a></div>`;
+    return;
+  }
+  const connection = data.connection;
+  metaConnection.innerHTML = `<div class="meta-connection-row"><div><strong>${escapeHtml(connection.page_name)}</strong><small>Instagram @${escapeHtml(connection.ig_username || '연결됨')} · 토큰은 화면에 표시되지 않습니다.</small></div><div class="connection-actions"><button class="text-button" id="disconnect-meta" type="button">연결 해제 및 토큰 삭제</button></div></div>`;
+  document.querySelector('#disconnect-meta').addEventListener('click', disconnectMeta);
+}
+
+async function disconnectMeta() {
+  if (!confirm('Meta 연결을 해제하고 서버에 저장된 토큰을 삭제할까요?')) return;
+  await api('/api/meta/connection', {method:'DELETE'});
+  instagramItems = [];
+  instagramResults.innerHTML = '';
+  instagramSearchMessage.textContent = 'Meta 연결과 저장된 토큰을 삭제했습니다.';
+  await loadMetaStatus();
+}
+
+function renderInstagramResults(items) {
+  instagramResults.innerHTML = '';
+  if (!items.length) {
+    instagramResults.innerHTML = '<div class="empty">이 해시태그의 공개 검색 결과가 없습니다.</div>';
+    return;
+  }
+  items.forEach((item, index) => {
+    const node = instagramResultTemplate.content.cloneNode(true);
+    const image = node.querySelector('img');
+    image.src = item.thumbnail_url;
+    image.alt = `${item.username || 'Instagram 게시자'} 공개 게시물 미리보기`;
+    image.addEventListener('error', () => image.hidden = true);
+    node.querySelector('.instagram-creator').textContent = item.username ? `@${item.username}` : '게시자 정보 없음';
+    node.querySelector('.instagram-type').textContent = item.media_type || 'MEDIA';
+    node.querySelector('.instagram-caption').textContent = item.caption || '캡션 없음';
+    node.querySelector('.instagram-engagement').textContent = `좋아요 ${item.like_count} · 댓글 ${item.comments_count} · ${item.timestamp || '게시일 미상'}`;
+    node.querySelector('a').href = item.permalink;
+    node.querySelector('.save-instagram-result').addEventListener('click', event => saveInstagramCandidate(index, event.target));
+    instagramResults.appendChild(node);
+  });
+}
+
+async function saveInstagramCandidate(index, button) {
+  const item = instagramItems[index];
+  button.disabled = true;
+  button.textContent = '저장 중...';
+  try {
+    await api('/api/candidates', {method:'POST', body:JSON.stringify({
+      url:item.permalink,
+      title:(item.caption || `Instagram @${item.username} 공개 게시물`).slice(0, 120),
+      creator:item.username ? `@${item.username}` : '',
+      description:item.caption,
+      thumbnail_url:item.thumbnail_url,
+      rights_status:'unknown',
+      status:'new',
+      source:'instagram_api',
+      auto_analyze:true
+    })});
+    button.textContent = '후보 저장됨';
+    await loadCandidates();
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = error.message.includes('이미') ? '이미 저장됨' : '다시 저장';
+  }
 }
 
 function escapeHtml(value) {
@@ -200,6 +291,27 @@ sourceList.addEventListener('click', async event => {
     loadSources();
   }
 });
+instagramSearchForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const hashtag = new FormData(instagramSearchForm).get('hashtag');
+  instagramSearchMessage.className = 'search-message';
+  instagramSearchMessage.textContent = `#${hashtag} 검색 중...`;
+  instagramResults.innerHTML = '';
+  try {
+    const data = await api('/api/meta/hashtag-search', {method:'POST', body:JSON.stringify({hashtag})});
+    instagramItems = data.items;
+    instagramSearchMessage.textContent = `#${data.hashtag} 공개 게시물 ${data.count}개를 찾았습니다. 발견은 재사용 허락을 의미하지 않습니다.`;
+    renderInstagramResults(data.items);
+  } catch (error) {
+    instagramItems = [];
+    if (error.body?.review_required) {
+      instagramSearchMessage.className = 'search-message review-required';
+      instagramSearchMessage.textContent = 'Meta 연결은 정상입니다. 공개 해시태그 검색은 Instagram Public Content Access 앱 검수 승인 후 활성화됩니다.';
+    } else {
+      instagramSearchMessage.textContent = error.message;
+    }
+  }
+});
 window.addEventListener('beforeinstallprompt', event => {
   event.preventDefault();
   installPrompt = event;
@@ -217,4 +329,5 @@ logout.addEventListener('click', async () => {
 loadCandidates().catch(error => list.innerHTML = `<div class="empty">${error.message}</div>`);
 loadTokens().catch(() => undefined);
 loadSources().catch(() => undefined);
+loadMetaStatus().catch(error => metaConnection.innerHTML = `<p class="muted">${escapeHtml(error.message)}</p>`);
 navigator.serviceWorker?.register('/service-worker.js');
