@@ -25,6 +25,9 @@ class MetaAPITests(unittest.TestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["username"], "maker")
         self.assertEqual(items[0]["permalink"], "https://www.instagram.com/reel/abc/")
+        requested_fields = graph_get.call_args_list[1].kwargs["fields"]
+        self.assertNotIn("thumbnail_url", requested_fields)
+        self.assertNotIn("username", requested_fields)
 
 
 if __name__ == "__main__":

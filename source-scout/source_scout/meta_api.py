@@ -111,7 +111,7 @@ def search_hashtag(connection: dict, hashtag: str, limit: int = 24) -> list[dict
         f"{hashtag_id}/recent_media",
         token,
         user_id=ig_user_id,
-        fields="id,caption,media_type,media_url,permalink,thumbnail_url,timestamp,username,like_count,comments_count",
+        fields="id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count",
         limit=max(1, min(limit, 50)),
     )
     items = []
