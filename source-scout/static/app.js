@@ -293,6 +293,9 @@ function renderVideoIdeas(node, item) {
   const progress = node.querySelector('.video-progress');
   const progressText = progress.querySelector('p');
   const ideaList = node.querySelector('.idea-list');
+  const preview = node.querySelector('.video-preview');
+  const player = node.querySelector('.candidate-video');
+  const downloadLink = node.querySelector('.download-video');
   const labels = {not_uploaded:'영상 없음', downloading:'가져오는 중', download_failed:'가져오기 실패', ready:'분석 준비', queued:'대기 중', analyzing:'분석 중', complete:'추천 완료', failed:'다시 시도'};
   const status = item.video_analysis_status || 'not_uploaded';
   state.textContent = labels[status] || status;
@@ -303,6 +306,12 @@ function renderVideoIdeas(node, item) {
   fetchButton.disabled = busy;
   fetchButton.textContent = status === 'download_failed' || item.video_uploaded ? 'URL에서 다시 가져오기' : (status === 'downloading' ? '가져오는 중…' : 'URL에서 가져오기');
   analyzeButton.textContent = status === 'failed' || status === 'complete' ? '다시 추천' : '아이디어 추천';
+  if (item.video_uploaded) {
+    const videoUrl = `/api/candidates/${item.id}/video-file`;
+    preview.hidden = false;
+    player.src = videoUrl;
+    downloadLink.href = `${videoUrl}?download=1`;
+  }
   if (item.video_filename) {
     node.querySelector('.video-file-label').childNodes[0].textContent = `교체 · ${item.video_filename.slice(0, 28)} `;
     uploadButton.textContent = '교체';
@@ -326,8 +335,19 @@ function renderVideoIdeas(node, item) {
   (result.ideas || []).forEach((idea, index) => {
     const card = document.createElement('article');
     card.className = 'idea-card';
-    const segments = (idea.recommended_segments || []).map(segment => `${formatTime(segment.start)}–${formatTime(segment.end)} ${segment.purpose}`).join(' · ');
-    card.innerHTML = `<div class="idea-card-top"><span>IDEA ${index + 1} · ${escapeHtml(idea.angle)}</span><strong>${Math.max(0, Math.min(100, Number(idea.score) || 0))}점</strong></div><h4>${escapeHtml(idea.title)}</h4><p>${escapeHtml(idea.one_line_pitch)}</p><details><summary>구성과 추천 구간 보기</summary><div class="idea-detail"><b>훅 방향</b><ul>${(idea.hook_ideas || []).map(value => `<li>${escapeHtml(value)}</li>`).join('')}</ul><b>전개</b><ol>${(idea.story_flow || []).map(value => `<li>${escapeHtml(value)}</li>`).join('')}</ol>${segments ? `<b>추천 구간</b><p>${escapeHtml(segments)}</p>` : ''}${(idea.research_needed || []).length ? `<b>추가 조사</b><p>${escapeHtml(idea.research_needed.join(', '))}</p>` : ''}</div></details>`;
+    const segments = (idea.recommended_segments || []).map(segment => `<button class="segment-button" type="button" data-seek="${Math.max(0, Number(segment.start) || 0)}"><span>${formatTime(segment.start)}–${formatTime(segment.end)}</span>${escapeHtml(segment.purpose)}</button>`).join('');
+    card.innerHTML = `<div class="idea-card-top"><span>IDEA ${index + 1} · ${escapeHtml(idea.angle)}</span><strong>${Math.max(0, Math.min(100, Number(idea.score) || 0))}점</strong></div><h4>${escapeHtml(idea.title)}</h4><p>${escapeHtml(idea.one_line_pitch)}</p><details><summary>구성과 추천 구간 보기</summary><div class="idea-detail"><b>훅 방향</b><ul>${(idea.hook_ideas || []).map(value => `<li>${escapeHtml(value)}</li>`).join('')}</ul><b>전개</b><ol>${(idea.story_flow || []).map(value => `<li>${escapeHtml(value)}</li>`).join('')}</ol>${segments ? `<b>추천 구간</b><div class="segment-list">${segments}</div>` : ''}${(idea.research_needed || []).length ? `<b>추가 조사</b><p>${escapeHtml(idea.research_needed.join(', '))}</p>` : ''}</div></details>`;
+    card.querySelectorAll('.segment-button').forEach(button => button.addEventListener('click', () => {
+      if (!item.video_uploaded) return;
+      preview.open = true;
+      const playFromSegment = () => {
+        player.currentTime = Number(button.dataset.seek) || 0;
+        player.play().catch(() => undefined);
+      };
+      if (player.readyState >= 1) playFromSegment();
+      else player.addEventListener('loadedmetadata', playFromSegment, {once:true});
+      preview.scrollIntoView({behavior:'smooth', block:'center'});
+    }));
     ideaList.appendChild(card);
   });
   uploadButton.addEventListener('click', async () => {

@@ -380,6 +380,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/api/candidates/") and "/tts/" in parsed.path:
             self.serve_candidate_tts(parsed.path)
             return
+        if parsed.path.startswith("/api/candidates/") and parsed.path.endswith("/video-file"):
+            self.serve_candidate_video(parsed)
+            return
         if parsed.path == "/api/mobile-tokens":
             self.send_json({"items": DB.list_mobile_tokens()})
             return
@@ -661,6 +664,75 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "private, max-age=3600")
         self.end_headers()
         self.wfile.write(body)
+
+    def serve_candidate_video(self, parsed) -> None:
+        try:
+            candidate_id = int(parsed.path.strip("/").split("/")[2])
+        except (ValueError, IndexError):
+            self.send_error_json("잘못된 영상 경로입니다.")
+            return
+        candidate = DB.get_candidate(candidate_id)
+        if not candidate or not candidate.get("video_path"):
+            self.send_error_json("저장된 영상을 찾을 수 없습니다.", 404)
+            return
+        try:
+            media_root = MEDIA_DIR.resolve()
+            video_path = Path(candidate["video_path"]).resolve()
+            if media_root not in video_path.parents or not video_path.is_file():
+                raise ValueError
+        except (OSError, ValueError):
+            self.send_error_json("저장된 영상 파일에 접근할 수 없습니다.", 404)
+            return
+        size = video_path.stat().st_size
+        start, end = 0, size - 1
+        status = HTTPStatus.OK
+        range_header = self.headers.get("Range", "")
+        if range_header.startswith("bytes="):
+            try:
+                first, last = range_header[6:].split(",", 1)[0].split("-", 1)
+                if first:
+                    start = int(first)
+                    end = int(last) if last else end
+                elif last:
+                    length = int(last)
+                    start = max(0, size - length)
+                end = min(end, size - 1)
+                if start < 0 or start > end:
+                    raise ValueError
+                status = HTTPStatus.PARTIAL_CONTENT
+            except ValueError:
+                self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+        mime_type = {
+            ".mp4": "video/mp4", ".mov": "video/quicktime",
+            ".webm": "video/webm", ".mkv": "video/x-matroska",
+        }.get(video_path.suffix.lower(), "application/octet-stream")
+        length = end - start + 1
+        self.send_response(status)
+        self.send_header("Content-Type", mime_type)
+        self.send_header("Content-Length", str(length))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Cache-Control", "private, max-age=3600")
+        if status == HTTPStatus.PARTIAL_CONTENT:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        disposition = "attachment" if parse_qs(parsed.query).get("download") == ["1"] else "inline"
+        safe_name = f"candidate-{candidate_id}{video_path.suffix.lower()}"
+        self.send_header("Content-Disposition", f'{disposition}; filename="{safe_name}"')
+        self.end_headers()
+        with video_path.open("rb") as video:
+            video.seek(start)
+            remaining = length
+            while remaining:
+                chunk = video.read(min(256 * 1024, remaining))
+                if not chunk:
+                    break
+                try:
+                    self.wfile.write(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    break
+                remaining -= len(chunk)
 
     def do_PATCH(self) -> None:
         if not self.require_auth():

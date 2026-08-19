@@ -108,6 +108,7 @@
         <section class="video-ideas">
           <div class="video-ideas-head"><div><strong>이 영상, 어떻게 풀까?</strong><small>영상과 음성을 Gemini가 관찰해 쇼츠 아이디어를 추천합니다.</small></div><span class="video-state">영상 없음</span></div>
           <div class="video-upload-row"><button class="button fetch-video" type="button">URL에서 가져오기</button><label class="video-file-label">직접 영상 선택<input class="video-file" type="file" accept="video/mp4,video/quicktime,video/webm"></label><button class="button upload-video" type="button">업로드</button><button class="button analyze-video" type="button" hidden>아이디어 추천</button></div>
+          <details class="video-preview" hidden><summary>저장된 영상 미리보기</summary><div class="video-player-shell"><video class="candidate-video" controls playsinline preload="metadata"></video></div><div class="video-preview-foot"><small>추천 구간을 누르면 해당 시점부터 재생됩니다.</small><a class="button download-video" download>원본 다운로드</a></div></details>
           <div class="video-progress" hidden><span></span><p></p></div>
           <div class="idea-list"></div>
         </section>
