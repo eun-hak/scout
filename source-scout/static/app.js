@@ -18,6 +18,7 @@ const instagramResults = document.querySelector('#instagram-results');
 const instagramResultTemplate = document.querySelector('#instagram-result-template');
 let installPrompt;
 let instagramItems = [];
+let videoPollTimer;
 
 const initialFilters = new URLSearchParams(location.search);
 if (initialFilters.get('status')) statusFilter.value = initialFilters.get('status');
@@ -84,6 +85,10 @@ async function loadCandidates() {
     return;
   }
   data.items.forEach(renderCandidate);
+  clearTimeout(videoPollTimer);
+  if (data.items.some(item => ['queued', 'analyzing'].includes(item.video_analysis_status))) {
+    videoPollTimer = setTimeout(() => loadCandidates().catch(() => undefined), 3500);
+  }
 }
 
 async function loadTokens() {
@@ -205,6 +210,7 @@ function renderCandidate(item) {
   node.querySelector('a').href = item.url;
   node.querySelector('.meta').textContent = `${item.creator || '원작자 미확인'} · ${rights[item.rights_status]}`;
   node.querySelector('.notes').textContent = item.notes || '메모 없음';
+  renderVideoIdeas(node, item);
   if (item.analysis_summary) {
     const analysis = document.createElement('p');
     analysis.className = 'analysis';
@@ -236,6 +242,74 @@ function renderCandidate(item) {
     loadCandidates();
   });
   list.appendChild(node);
+}
+
+function renderVideoIdeas(node, item) {
+  const state = node.querySelector('.video-state');
+  const fileInput = node.querySelector('.video-file');
+  const uploadButton = node.querySelector('.upload-video');
+  const analyzeButton = node.querySelector('.analyze-video');
+  const progress = node.querySelector('.video-progress');
+  const progressText = progress.querySelector('p');
+  const ideaList = node.querySelector('.idea-list');
+  const labels = {not_uploaded:'영상 없음', ready:'분석 준비', queued:'대기 중', analyzing:'분석 중', complete:'추천 완료', failed:'다시 시도'};
+  const status = item.video_analysis_status || 'not_uploaded';
+  state.textContent = labels[status] || status;
+  state.className = `video-state ${status}`;
+  analyzeButton.hidden = !item.video_uploaded || ['queued', 'analyzing'].includes(status);
+  analyzeButton.textContent = status === 'failed' || status === 'complete' ? '다시 추천' : '아이디어 추천';
+  if (item.video_filename) {
+    node.querySelector('.video-file-label').childNodes[0].textContent = `교체 · ${item.video_filename.slice(0, 28)} `;
+    uploadButton.textContent = '교체';
+  }
+  if (['queued', 'analyzing'].includes(status)) {
+    progress.hidden = false;
+    progressText.textContent = item.video_analysis_detail || '영상을 분석하고 있습니다.';
+  } else if (status === 'failed') {
+    progress.hidden = false;
+    progress.classList.add('failed');
+    progressText.textContent = item.video_analysis_detail || '분석에 실패했습니다.';
+  }
+  let result = {};
+  try { result = JSON.parse(item.video_analysis_json || '{}'); } catch { result = {}; }
+  if (result.summary) {
+    const summary = document.createElement('p');
+    summary.className = 'video-summary';
+    summary.textContent = `영상 관찰 · ${result.summary}`;
+    ideaList.appendChild(summary);
+  }
+  (result.ideas || []).forEach((idea, index) => {
+    const card = document.createElement('article');
+    card.className = 'idea-card';
+    const segments = (idea.recommended_segments || []).map(segment => `${formatTime(segment.start)}–${formatTime(segment.end)} ${segment.purpose}`).join(' · ');
+    card.innerHTML = `<div class="idea-card-top"><span>IDEA ${index + 1} · ${escapeHtml(idea.angle)}</span><strong>${Math.max(0, Math.min(100, Number(idea.score) || 0))}점</strong></div><h4>${escapeHtml(idea.title)}</h4><p>${escapeHtml(idea.one_line_pitch)}</p><details><summary>구성과 추천 구간 보기</summary><div class="idea-detail"><b>훅 방향</b><ul>${(idea.hook_ideas || []).map(value => `<li>${escapeHtml(value)}</li>`).join('')}</ul><b>전개</b><ol>${(idea.story_flow || []).map(value => `<li>${escapeHtml(value)}</li>`).join('')}</ol>${segments ? `<b>추천 구간</b><p>${escapeHtml(segments)}</p>` : ''}${(idea.research_needed || []).length ? `<b>추가 조사</b><p>${escapeHtml(idea.research_needed.join(', '))}</p>` : ''}</div></details>`;
+    ideaList.appendChild(card);
+  });
+  uploadButton.addEventListener('click', async () => {
+    const file = fileInput.files[0];
+    if (!file) { fileInput.click(); return; }
+    if (file.size > 60 * 1024 * 1024) { alert('영상은 최대 60MB까지 업로드할 수 있습니다.'); return; }
+    uploadButton.disabled = true;
+    uploadButton.textContent = '업로드 중…';
+    const body = new FormData(); body.append('video', file);
+    try {
+      const response = await fetch(`/api/candidates/${item.id}/video`, {method:'POST', body});
+      if (response.status === 401) { location.replace('/login'); return; }
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || '영상 업로드에 실패했습니다.');
+      await loadCandidates();
+    } catch (error) { alert(error.message); uploadButton.disabled = false; uploadButton.textContent = '업로드'; }
+  });
+  analyzeButton.addEventListener('click', async () => {
+    analyzeButton.disabled = true;
+    try { await api(`/api/candidates/${item.id}/video-analysis`, {method:'POST'}); await loadCandidates(); }
+    catch (error) { alert(error.message); analyzeButton.disabled = false; }
+  });
+}
+
+function formatTime(seconds) {
+  const value = Math.max(0, Math.round(Number(seconds) || 0));
+  return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
 }
 
 async function updateCandidate(id, payload) {

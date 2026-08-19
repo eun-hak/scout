@@ -30,6 +30,12 @@ CREATE TABLE IF NOT EXISTS candidates (
     analysis_status TEXT NOT NULL DEFAULT 'pending',
     analysis_detail TEXT NOT NULL DEFAULT '',
     script_ideas TEXT NOT NULL DEFAULT '',
+    video_path TEXT NOT NULL DEFAULT '',
+    video_filename TEXT NOT NULL DEFAULT '',
+    video_size INTEGER NOT NULL DEFAULT 0,
+    video_analysis_status TEXT NOT NULL DEFAULT 'not_uploaded',
+    video_analysis_detail TEXT NOT NULL DEFAULT '',
+    video_analysis_json TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -88,6 +94,12 @@ class Database:
             "analysis_status": "TEXT NOT NULL DEFAULT 'pending'",
             "analysis_detail": "TEXT NOT NULL DEFAULT ''",
             "script_ideas": "TEXT NOT NULL DEFAULT ''",
+            "video_path": "TEXT NOT NULL DEFAULT ''",
+            "video_filename": "TEXT NOT NULL DEFAULT ''",
+            "video_size": "INTEGER NOT NULL DEFAULT 0",
+            "video_analysis_status": "TEXT NOT NULL DEFAULT 'not_uploaded'",
+            "video_analysis_detail": "TEXT NOT NULL DEFAULT ''",
+            "video_analysis_json": "TEXT NOT NULL DEFAULT ''",
         }
         for name, definition in additions.items():
             if name not in columns:

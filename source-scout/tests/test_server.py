@@ -1,7 +1,7 @@
 import unittest
 
 from source_scout.analyzer import analyze_metadata
-from source_scout.server import detect_platform, validate_url
+from source_scout.server import detect_platform, public_candidate, validate_url
 
 
 class ServerTests(unittest.TestCase):
@@ -13,6 +13,11 @@ class ServerTests(unittest.TestCase):
     def test_rejects_non_http_url(self):
         with self.assertRaises(ValueError):
             validate_url("file:///tmp/video.mp4")
+
+    def test_public_candidate_hides_server_video_path(self):
+        result = public_candidate({"id": 1, "video_path": "/private/media/video.mp4"})
+        self.assertNotIn("video_path", result)
+        self.assertTrue(result["video_uploaded"])
 
     def test_metadata_analysis_suggests_process_theme(self):
         result = analyze_metadata(

@@ -112,6 +112,17 @@ Instagram 공개 해시태그 검색은 Meta의 `Instagram Public Content Access
 
 ## 영상 분석 서버 연결
 
+### Gemini 영상 기반 쇼츠 아이디어 추천
+
+후보 카드에서 MP4, MOV, WebM 영상을 최대 60MB까지 업로드하면 Gemini가 장면과 음성을 관찰하고 서로 다른 쇼츠 아이디어를 추천합니다.
+
+```text
+GEMINI_API_KEY=Google AI Studio에서 발급한 키
+SOURCE_SCOUT_GEMINI_MODEL=gemini-3.5-flash-lite
+```
+
+영상은 `SOURCE_SCOUT_DATA_DIR/media/originals`에 저장됩니다. Gemini 응답은 완성 대본이 아니라 영상 요약, 타임라인, 흥미 지점, 아이디어 3~5개, 추천 구간, 추가 조사 항목으로 구성됩니다. API 키와 업로드 영상은 Git에 포함하지 않습니다.
+
 기본 분석은 제목·설명·게시자 정보만 사용하며 화면에 `메타데이터만 분석`으로 표시됩니다. 실제 화면·음성 분석 서버가 준비되면 다음 환경변수로 Webhook을 연결합니다.
 
 ```text

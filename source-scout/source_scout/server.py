@@ -10,6 +10,8 @@ import sqlite3
 import threading
 import time
 import webbrowser
+from email import policy
+from email.parser import BytesParser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -22,11 +24,14 @@ from .database import Database
 from .discovery import fetch_feed
 from .metadata import canonicalize_url, ensure_public_url, fetch_metadata
 from .meta_api import MetaAPIError, exchange_code, exchange_long_lived_token, inspect_connection, inspect_scopes, revoke_permissions, search_hashtag
+from .gemini_video import GeminiVideoError, analyze_video
 from .scoring import SCORE_FIELDS, calculate_score, clamp_rating
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static"
 DATA_DIR = Path(os.environ.get("SOURCE_SCOUT_DATA_DIR", str(ROOT / "data"))).expanduser()
+MEDIA_DIR = DATA_DIR / "media" / "originals"
+MAX_VIDEO_BYTES = 60 * 1024 * 1024
 DB = Database(DATA_DIR / "source_scout.db")
 AUTH: SessionManager | None = None
 META_OAUTH_STATES: dict[str, float] = {}
@@ -61,6 +66,14 @@ def validate_url(value: object) -> str:
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("http 또는 https 형식의 URL을 입력하세요.")
     return canonicalize_url(url)
+
+
+def public_candidate(candidate: dict | None) -> dict | None:
+    if candidate is None:
+        return None
+    item = dict(candidate)
+    item["video_uploaded"] = bool(item.pop("video_path", ""))
+    return item
 
 
 def normalize_payload(payload: dict, creating: bool = False) -> dict:
@@ -150,6 +163,28 @@ def discovery_loop(interval_minutes: int) -> None:
         for source in DB.list_discovery_sources(enabled_only=True):
             run_discovery_source(source)
         threading.Event().wait(interval_minutes * 60)
+
+
+def analyze_candidate_video(candidate_id: int) -> None:
+    candidate = DB.get_candidate(candidate_id)
+    if not candidate or not candidate.get("video_path"):
+        return
+    DB.update_candidate(candidate_id, {
+        "video_analysis_status": "analyzing",
+        "video_analysis_detail": "Gemini가 영상의 장면과 음성을 분석하고 있습니다.",
+    })
+    try:
+        result = analyze_video(Path(candidate["video_path"]))
+        DB.update_candidate(candidate_id, {
+            "video_analysis_status": "complete",
+            "video_analysis_detail": f"쇼츠 아이디어 {len(result.get('ideas') or [])}개를 추천했습니다.",
+            "video_analysis_json": json.dumps(result, ensure_ascii=False),
+        })
+    except (GeminiVideoError, OSError, ValueError) as exc:
+        DB.update_candidate(candidate_id, {
+            "video_analysis_status": "failed",
+            "video_analysis_detail": str(exc)[:1000],
+        })
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -279,7 +314,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/candidates":
             query = parse_qs(parsed.query)
             candidates = DB.list_candidates(query.get("status", [""])[0], query.get("theme", [""])[0])
-            self.send_json({"items": candidates, "count": len(candidates)})
+            self.send_json({"items": [public_candidate(item) for item in candidates], "count": len(candidates)})
             return
         if parsed.path == "/api/mobile-tokens":
             self.send_json({"items": DB.list_mobile_tokens()})
@@ -317,6 +352,12 @@ class Handler(BaseHTTPRequestHandler):
             self.create_candidate_request("mobile_share")
             return
         if not self.require_auth():
+            return
+        if self.path.startswith("/api/candidates/") and self.path.endswith("/video"):
+            self.upload_candidate_video()
+            return
+        if self.path.startswith("/api/candidates/") and self.path.endswith("/video-analysis"):
+            self.start_candidate_video_analysis()
             return
         if self.path == "/api/mobile-tokens":
             try:
@@ -375,7 +416,7 @@ class Handler(BaseHTTPRequestHandler):
                 ideas = suggestion.get("script_ideas") or []
                 update["script_ideas"] = json.dumps(ideas, ensure_ascii=False) if isinstance(ideas, list) else str(ideas)[:10000]
                 update["total_score"] = calculate_score({**current, **update})
-                self.send_json(DB.update_candidate(candidate_id, update))
+                self.send_json(public_candidate(DB.update_candidate(candidate_id, update)))
             except Exception as exc:
                 DB.update_candidate(candidate_id, {"analysis_status": "failed", "analysis_detail": str(exc)[:1000]})
                 self.send_error_json("분석 작업에 실패했습니다.", 502)
@@ -389,7 +430,7 @@ class Handler(BaseHTTPRequestHandler):
         payload: dict = {}
         try:
             payload = self.read_json()
-            self.send_json(candidate_from_payload(payload, source), HTTPStatus.CREATED)
+            self.send_json(public_candidate(candidate_from_payload(payload, source)), HTTPStatus.CREATED)
         except sqlite3.IntegrityError:
             existing = None
             try:
@@ -399,10 +440,76 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({
                 "error": "이미 보관함에 있는 영상입니다.",
                 "duplicate": True,
-                "candidate": existing,
+                "candidate": public_candidate(existing),
             }, HTTPStatus.CONFLICT)
         except ValueError as exc:
             self.send_error_json(str(exc))
+
+    def upload_candidate_video(self) -> None:
+        try:
+            candidate_id = int(self.path.strip("/").split("/")[2])
+        except (ValueError, IndexError):
+            self.send_error_json("잘못된 후보 ID입니다.")
+            return
+        candidate = DB.get_candidate(candidate_id)
+        if not candidate:
+            self.send_error_json("후보를 찾을 수 없습니다.", 404)
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if length <= 0 or length > MAX_VIDEO_BYTES + 1024 * 1024:
+            self.send_error_json("영상은 최대 60MB까지 업로드할 수 있습니다.", HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            return
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.startswith("multipart/form-data"):
+            self.send_error_json("multipart/form-data 형식으로 영상을 전송하세요.")
+            return
+        raw = self.rfile.read(length)
+        message = BytesParser(policy=policy.default).parsebytes(
+            f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode() + raw
+        )
+        part = next((item for item in message.iter_parts() if item.get_param("name", header="content-disposition") == "video"), None)
+        if part is None:
+            self.send_error_json("영상 파일을 찾지 못했습니다.")
+            return
+        video = part.get_payload(decode=True) or b""
+        filename = str(part.get_filename() or "video.mp4")[:255]
+        suffix = Path(filename).suffix.lower()
+        allowed = {".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm"}
+        if suffix not in allowed or len(video) > MAX_VIDEO_BYTES:
+            self.send_error_json("MP4, MOV, WebM 영상만 최대 60MB까지 업로드할 수 있습니다.")
+            return
+        MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+        destination = MEDIA_DIR / f"candidate-{candidate_id}-{secrets.token_hex(8)}{suffix}"
+        destination.write_bytes(video)
+        previous = Path(candidate["video_path"]) if candidate.get("video_path") else None
+        updated = DB.update_candidate(candidate_id, {
+            "video_path": str(destination), "video_filename": filename, "video_size": len(video),
+            "video_analysis_status": "ready", "video_analysis_detail": "분석할 준비가 되었습니다.",
+            "video_analysis_json": "",
+        })
+        if previous and previous != destination and previous.is_file() and MEDIA_DIR in previous.parents:
+            previous.unlink(missing_ok=True)
+        self.send_json(public_candidate(updated), HTTPStatus.CREATED)
+
+    def start_candidate_video_analysis(self) -> None:
+        try:
+            candidate_id = int(self.path.strip("/").split("/")[2])
+        except (ValueError, IndexError):
+            self.send_error_json("잘못된 후보 ID입니다.")
+            return
+        candidate = DB.get_candidate(candidate_id)
+        if not candidate or not candidate.get("video_path"):
+            self.send_error_json("먼저 분석할 영상을 업로드하세요.", HTTPStatus.CONFLICT)
+            return
+        if candidate.get("video_analysis_status") in {"queued", "analyzing"}:
+            self.send_error_json("이미 영상 분석이 진행 중입니다.", HTTPStatus.CONFLICT)
+            return
+        DB.update_candidate(candidate_id, {"video_analysis_status": "queued", "video_analysis_detail": "분석 작업을 준비하고 있습니다."})
+        threading.Thread(target=analyze_candidate_video, args=(candidate_id,), daemon=True).start()
+        self.send_json({"status": "queued", "candidate_id": candidate_id}, HTTPStatus.ACCEPTED)
 
     def do_PATCH(self) -> None:
         if not self.require_auth():
@@ -422,7 +529,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("사용 권리가 확인되어야 승인할 수 있습니다.")
             scoring_values = {**current, **data}
             data["total_score"] = calculate_score(scoring_values)
-            self.send_json(DB.update_candidate(candidate_id, data))
+            self.send_json(public_candidate(DB.update_candidate(candidate_id, data)))
         except ValueError as exc:
             self.send_error_json(str(exc))
 
