@@ -42,6 +42,7 @@ def download_video(url: str, output_dir: Path, candidate_id: int, max_bytes: int
         "max_filesize": max_bytes,
         "noplaylist": True,
         "quiet": True,
+        "noprogress": True,
         "no_warnings": True,
         "restrictfilenames": True,
         "socket_timeout": 30,
