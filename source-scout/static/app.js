@@ -18,7 +18,7 @@ const instagramResults = document.querySelector('#instagram-results');
 const instagramResultTemplate = document.querySelector('#instagram-result-template');
 let installPrompt;
 let instagramItems = [];
-let videoPollTimer;
+let jobPollTimer;
 
 const initialFilters = new URLSearchParams(location.search);
 if (initialFilters.get('status')) statusFilter.value = initialFilters.get('status');
@@ -85,9 +85,9 @@ async function loadCandidates() {
     return;
   }
   data.items.forEach(renderCandidate);
-  clearTimeout(videoPollTimer);
-  if (data.items.some(item => ['queued', 'analyzing'].includes(item.video_analysis_status))) {
-    videoPollTimer = setTimeout(() => loadCandidates().catch(() => undefined), 3500);
+  clearTimeout(jobPollTimer);
+  if (data.items.some(item => ['queued', 'analyzing'].includes(item.video_analysis_status) || ['queued', 'generating'].includes(item.tts_status))) {
+    jobPollTimer = setTimeout(() => loadCandidates().catch(() => undefined), 3500);
   }
 }
 
@@ -211,6 +211,7 @@ function renderCandidate(item) {
   node.querySelector('.meta').textContent = `${item.creator || '원작자 미확인'} · ${rights[item.rights_status]}`;
   node.querySelector('.notes').textContent = item.notes || '메모 없음';
   renderVideoIdeas(node, item);
+  renderTTS(node, item);
   if (item.analysis_summary) {
     const analysis = document.createElement('p');
     analysis.className = 'analysis';
@@ -242,6 +243,45 @@ function renderCandidate(item) {
     loadCandidates();
   });
   list.appendChild(node);
+}
+
+function renderTTS(node, item) {
+  const state = node.querySelector('.tts-state');
+  const script = node.querySelector('.tts-script');
+  const button = node.querySelector('.generate-tts');
+  const detail = node.querySelector('.tts-detail');
+  const audioList = node.querySelector('.tts-audio-list');
+  const status = item.tts_status || 'idle';
+  const labels = {idle:'대본 대기', queued:'연결 중', generating:'생성 중', complete:'생성 완료', failed:'오류'};
+  state.textContent = labels[status] || status;
+  state.className = `tts-state ${status}`;
+  script.value = item.tts_script || '';
+  button.disabled = ['queued', 'generating'].includes(status);
+  button.textContent = status === 'complete' || status === 'failed' ? '다시 생성' : (button.disabled ? '생성 중…' : '음성 생성');
+  if (item.tts_detail) detail.textContent = item.tts_detail;
+  let files = [];
+  try { files = JSON.parse(item.tts_files || '[]'); } catch { files = []; }
+  files.forEach((file, index) => {
+    const row = document.createElement('div');
+    row.className = 'tts-audio-row';
+    const duration = file.duration_seconds ? `${Number(file.duration_seconds).toFixed(1)}초` : '음성';
+    row.innerHTML = `<span>문장 ${index + 1}<small>${duration}</small></span><audio controls preload="none" src="/api/candidates/${item.id}/tts/${index}"></audio><a class="button" href="/api/candidates/${item.id}/tts/${index}" download>다운로드</a>`;
+    audioList.appendChild(row);
+  });
+  button.addEventListener('click', async () => {
+    const value = script.value.trim();
+    if (!value) { script.focus(); alert('TTS로 만들 대본을 입력하세요.'); return; }
+    button.disabled = true;
+    button.textContent = '연결 중…';
+    try {
+      await api(`/api/candidates/${item.id}/tts`, {method:'POST', body:JSON.stringify({script:value})});
+      await loadCandidates();
+    } catch (error) {
+      alert(error.message);
+      button.disabled = false;
+      button.textContent = '음성 생성';
+    }
+  });
 }
 
 function renderVideoIdeas(node, item) {

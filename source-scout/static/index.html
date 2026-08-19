@@ -111,6 +111,12 @@
           <div class="video-progress" hidden><span></span><p></p></div>
           <div class="idea-list"></div>
         </section>
+        <section class="tts-workbench">
+          <div class="tts-head"><div><strong>대본을 목소리로 만들기</strong><small>확정한 대본을 개인 TTS 서버의 ‘목소리1’로 생성합니다.</small></div><span class="tts-state">대본 대기</span></div>
+          <label class="tts-script-label">TTS 대본<textarea class="tts-script" rows="5" maxlength="5000" placeholder="예: 처음엔 평범한 돌처럼 보이지만, 장인이 손을 대는 순간 완전히 달라집니다."></textarea></label>
+          <div class="tts-actions"><small class="tts-detail">문장 단위로 여러 음성 파일이 생성될 수 있습니다.</small><button class="button generate-tts" type="button">음성 생성</button></div>
+          <div class="tts-audio-list"></div>
+        </section>
         <div class="candidate-controls">
           <label>작업 상태<select class="status"></select></label>
           <label>권리 상태<select class="rights"></select></label>

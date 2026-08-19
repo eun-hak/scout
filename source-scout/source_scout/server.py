@@ -26,11 +26,13 @@ from .metadata import canonicalize_url, ensure_public_url, fetch_metadata
 from .meta_api import MetaAPIError, exchange_code, exchange_long_lived_token, inspect_connection, inspect_scopes, revoke_permissions, search_hashtag
 from .gemini_video import GeminiVideoError, analyze_video
 from .scoring import SCORE_FIELDS, calculate_score, clamp_rating
+from .tts_client import TTSError, generate_tts
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static"
 DATA_DIR = Path(os.environ.get("SOURCE_SCOUT_DATA_DIR", str(ROOT / "data"))).expanduser()
 MEDIA_DIR = DATA_DIR / "media" / "originals"
+TTS_DIR = DATA_DIR / "tts"
 MAX_VIDEO_BYTES = 60 * 1024 * 1024
 DB = Database(DATA_DIR / "source_scout.db")
 AUTH: SessionManager | None = None
@@ -187,6 +189,28 @@ def analyze_candidate_video(candidate_id: int) -> None:
         })
 
 
+def generate_candidate_tts(candidate_id: int, script: str, job_id: str) -> None:
+    DB.update_candidate(candidate_id, {
+        "tts_status": "generating",
+        "tts_detail": "목소리1로 문장별 음성을 생성하고 있습니다.",
+    })
+    try:
+        output_dir = TTS_DIR / f"candidate-{candidate_id}" / job_id
+        files = generate_tts(script, output_dir)
+        for item in files:
+            item["path"] = f"{job_id}/{item['filename']}"
+        DB.update_candidate(candidate_id, {
+            "tts_status": "complete",
+            "tts_detail": f"음성 파일 {len(files)}개를 만들었습니다.",
+            "tts_files": json.dumps(files, ensure_ascii=False),
+        })
+    except (TTSError, OSError, ValueError) as exc:
+        DB.update_candidate(candidate_id, {
+            "tts_status": "failed",
+            "tts_detail": str(exc)[:1000],
+        })
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "SourceScout/0.1"
 
@@ -316,6 +340,9 @@ class Handler(BaseHTTPRequestHandler):
             candidates = DB.list_candidates(query.get("status", [""])[0], query.get("theme", [""])[0])
             self.send_json({"items": [public_candidate(item) for item in candidates], "count": len(candidates)})
             return
+        if parsed.path.startswith("/api/candidates/") and "/tts/" in parsed.path:
+            self.serve_candidate_tts(parsed.path)
+            return
         if parsed.path == "/api/mobile-tokens":
             self.send_json({"items": DB.list_mobile_tokens()})
             return
@@ -358,6 +385,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path.startswith("/api/candidates/") and self.path.endswith("/video-analysis"):
             self.start_candidate_video_analysis()
+            return
+        if self.path.startswith("/api/candidates/") and self.path.endswith("/tts"):
+            self.start_candidate_tts()
             return
         if self.path == "/api/mobile-tokens":
             try:
@@ -510,6 +540,65 @@ class Handler(BaseHTTPRequestHandler):
         DB.update_candidate(candidate_id, {"video_analysis_status": "queued", "video_analysis_detail": "분석 작업을 준비하고 있습니다."})
         threading.Thread(target=analyze_candidate_video, args=(candidate_id,), daemon=True).start()
         self.send_json({"status": "queued", "candidate_id": candidate_id}, HTTPStatus.ACCEPTED)
+
+    def start_candidate_tts(self) -> None:
+        try:
+            candidate_id = int(self.path.strip("/").split("/")[2])
+            payload = self.read_json()
+        except (ValueError, IndexError) as exc:
+            self.send_error_json(str(exc) or "잘못된 후보 ID입니다.")
+            return
+        candidate = DB.get_candidate(candidate_id)
+        if not candidate:
+            self.send_error_json("후보를 찾을 수 없습니다.", 404)
+            return
+        script = str(payload.get("script") or "").strip()
+        if not script:
+            self.send_error_json("TTS로 만들 대본을 입력하세요.")
+            return
+        if len(script) > 5000:
+            self.send_error_json("대본은 5,000자 이하로 입력하세요.")
+            return
+        if candidate.get("tts_status") in {"queued", "generating"}:
+            self.send_error_json("이미 TTS 생성이 진행 중입니다.", HTTPStatus.CONFLICT)
+            return
+        job_id = secrets.token_hex(8)
+        DB.update_candidate(candidate_id, {
+            "tts_script": script, "tts_status": "queued",
+            "tts_detail": "TTS 서버 연결을 준비하고 있습니다.", "tts_files": "",
+        })
+        threading.Thread(target=generate_candidate_tts, args=(candidate_id, script, job_id), daemon=True).start()
+        self.send_json({"status": "queued", "candidate_id": candidate_id}, HTTPStatus.ACCEPTED)
+
+    def serve_candidate_tts(self, path: str) -> None:
+        parts = path.strip("/").split("/")
+        try:
+            candidate_id, file_index = int(parts[2]), int(parts[4])
+        except (ValueError, IndexError):
+            self.send_error_json("잘못된 TTS 파일 경로입니다.")
+            return
+        candidate = DB.get_candidate(candidate_id)
+        if not candidate:
+            self.send_error_json("후보를 찾을 수 없습니다.", 404)
+            return
+        try:
+            files = json.loads(candidate.get("tts_files") or "[]")
+            item = files[file_index]
+            candidate_dir = (TTS_DIR / f"candidate-{candidate_id}").resolve()
+            audio_path = (candidate_dir / item["path"]).resolve()
+            if candidate_dir not in audio_path.parents or not audio_path.is_file():
+                raise ValueError
+        except (ValueError, IndexError, KeyError, TypeError, json.JSONDecodeError):
+            self.send_error_json("TTS 음성 파일을 찾을 수 없습니다.", 404)
+            return
+        body = audio_path.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", item.get("mime_type") or "audio/wav")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Disposition", f'inline; filename="tts-{candidate_id}-{file_index + 1}{audio_path.suffix}"')
+        self.send_header("Cache-Control", "private, max-age=3600")
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_PATCH(self) -> None:
         if not self.require_auth():

@@ -4,5 +4,7 @@ __pycache__/
 .venv/
 source-scout/data/*.db
 source-scout/data/*.db-*
+source-scout/data/**/*.wav
+source-scout/data/tts/
 source-scout/exports/
 source-scout/.env

@@ -10,7 +10,7 @@ Group=ubuntu
 WorkingDirectory=/home/ubuntu/git/scout/source-scout
 EnvironmentFile=/home/ubuntu/.config/source-scout/source-scout.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/usr/bin/python3 -m source_scout
+ExecStart=/home/ubuntu/git/scout/source-scout/.venv/bin/python -m source_scout
 Restart=on-failure
 RestartSec=3
 UMask=0077
