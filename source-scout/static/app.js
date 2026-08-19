@@ -86,7 +86,7 @@ async function loadCandidates() {
   }
   data.items.forEach(renderCandidate);
   clearTimeout(jobPollTimer);
-  if (data.items.some(item => ['queued', 'analyzing'].includes(item.video_analysis_status) || ['queued', 'generating'].includes(item.tts_status))) {
+  if (data.items.some(item => ['downloading', 'queued', 'analyzing'].includes(item.video_analysis_status) || ['queued', 'generating'].includes(item.tts_status))) {
     jobPollTimer = setTimeout(() => loadCandidates().catch(() => undefined), 3500);
   }
 }
@@ -288,24 +288,29 @@ function renderVideoIdeas(node, item) {
   const state = node.querySelector('.video-state');
   const fileInput = node.querySelector('.video-file');
   const uploadButton = node.querySelector('.upload-video');
+  const fetchButton = node.querySelector('.fetch-video');
   const analyzeButton = node.querySelector('.analyze-video');
   const progress = node.querySelector('.video-progress');
   const progressText = progress.querySelector('p');
   const ideaList = node.querySelector('.idea-list');
-  const labels = {not_uploaded:'영상 없음', ready:'분석 준비', queued:'대기 중', analyzing:'분석 중', complete:'추천 완료', failed:'다시 시도'};
+  const labels = {not_uploaded:'영상 없음', downloading:'가져오는 중', download_failed:'가져오기 실패', ready:'분석 준비', queued:'대기 중', analyzing:'분석 중', complete:'추천 완료', failed:'다시 시도'};
   const status = item.video_analysis_status || 'not_uploaded';
   state.textContent = labels[status] || status;
   state.className = `video-state ${status}`;
-  analyzeButton.hidden = !item.video_uploaded || ['queued', 'analyzing'].includes(status);
+  const busy = ['downloading', 'queued', 'analyzing'].includes(status);
+  analyzeButton.hidden = !item.video_uploaded || busy;
+  fetchButton.hidden = !['instagram', 'tiktok', 'youtube'].includes(item.platform);
+  fetchButton.disabled = busy;
+  fetchButton.textContent = status === 'download_failed' || item.video_uploaded ? 'URL에서 다시 가져오기' : (status === 'downloading' ? '가져오는 중…' : 'URL에서 가져오기');
   analyzeButton.textContent = status === 'failed' || status === 'complete' ? '다시 추천' : '아이디어 추천';
   if (item.video_filename) {
     node.querySelector('.video-file-label').childNodes[0].textContent = `교체 · ${item.video_filename.slice(0, 28)} `;
     uploadButton.textContent = '교체';
   }
-  if (['queued', 'analyzing'].includes(status)) {
+  if (['downloading', 'queued', 'analyzing'].includes(status)) {
     progress.hidden = false;
     progressText.textContent = item.video_analysis_detail || '영상을 분석하고 있습니다.';
-  } else if (status === 'failed') {
+  } else if (['download_failed', 'failed'].includes(status)) {
     progress.hidden = false;
     progress.classList.add('failed');
     progressText.textContent = item.video_analysis_detail || '분석에 실패했습니다.';
@@ -339,6 +344,12 @@ function renderVideoIdeas(node, item) {
       if (!response.ok) throw new Error(data.error || '영상 업로드에 실패했습니다.');
       await loadCandidates();
     } catch (error) { alert(error.message); uploadButton.disabled = false; uploadButton.textContent = '업로드'; }
+  });
+  fetchButton.addEventListener('click', async () => {
+    fetchButton.disabled = true;
+    fetchButton.textContent = '가져오는 중…';
+    try { await api(`/api/candidates/${item.id}/fetch-video`, {method:'POST'}); await loadCandidates(); }
+    catch (error) { alert(error.message); fetchButton.disabled = false; fetchButton.textContent = 'URL에서 다시 가져오기'; }
   });
   analyzeButton.addEventListener('click', async () => {
     analyzeButton.disabled = true;

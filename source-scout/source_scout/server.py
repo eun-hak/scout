@@ -27,6 +27,7 @@ from .meta_api import MetaAPIError, exchange_code, exchange_long_lived_token, in
 from .gemini_video import GeminiVideoError, analyze_video
 from .scoring import SCORE_FIELDS, calculate_score, clamp_rating
 from .tts_client import TTSError, generate_tts
+from .video_downloader import VideoDownloadError, download_video
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static"
@@ -187,6 +188,42 @@ def analyze_candidate_video(candidate_id: int) -> None:
             "video_analysis_status": "failed",
             "video_analysis_detail": str(exc)[:1000],
         })
+
+
+def fetch_and_analyze_candidate_video(candidate_id: int) -> None:
+    candidate = DB.get_candidate(candidate_id)
+    if not candidate:
+        return
+    previous = Path(candidate["video_path"]) if candidate.get("video_path") else None
+    try:
+        result = download_video(candidate["url"], MEDIA_DIR, candidate_id, MAX_VIDEO_BYTES)
+        destination = Path(result["path"])
+        DB.update_candidate(candidate_id, {
+            "video_path": str(destination),
+            "video_filename": result["filename"],
+            "video_size": result["size"],
+            "video_analysis_status": "queued",
+            "video_analysis_detail": "영상을 가져왔습니다. Gemini 아이디어 분석을 준비합니다.",
+            "video_analysis_json": "",
+        })
+        if previous and previous != destination and previous.is_file() and MEDIA_DIR in previous.parents:
+            previous.unlink(missing_ok=True)
+        analyze_candidate_video(candidate_id)
+    except (VideoDownloadError, OSError, ValueError) as exc:
+        DB.update_candidate(candidate_id, {
+            "video_analysis_status": "download_failed",
+            "video_analysis_detail": str(exc)[:1000],
+        })
+
+
+def queue_candidate_video_fetch(candidate_id: int) -> dict | None:
+    updated = DB.update_candidate(candidate_id, {
+        "video_analysis_status": "downloading",
+        "video_analysis_detail": "원본 URL에서 영상을 가져오고 있습니다.",
+        "video_analysis_json": "",
+    })
+    threading.Thread(target=fetch_and_analyze_candidate_video, args=(candidate_id,), daemon=True).start()
+    return updated
 
 
 def generate_candidate_tts(candidate_id: int, script: str, job_id: str) -> None:
@@ -386,6 +423,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/candidates/") and self.path.endswith("/video-analysis"):
             self.start_candidate_video_analysis()
             return
+        if self.path.startswith("/api/candidates/") and self.path.endswith("/fetch-video"):
+            self.start_candidate_video_fetch()
+            return
         if self.path.startswith("/api/candidates/") and self.path.endswith("/tts"):
             self.start_candidate_tts()
             return
@@ -460,7 +500,10 @@ class Handler(BaseHTTPRequestHandler):
         payload: dict = {}
         try:
             payload = self.read_json()
-            self.send_json(public_candidate(candidate_from_payload(payload, source)), HTTPStatus.CREATED)
+            candidate = candidate_from_payload(payload, source)
+            if detect_platform(candidate["url"]) in {"instagram", "tiktok", "youtube"}:
+                candidate = queue_candidate_video_fetch(candidate["id"]) or candidate
+            self.send_json(public_candidate(candidate), HTTPStatus.CREATED)
         except sqlite3.IntegrityError:
             existing = None
             try:
@@ -540,6 +583,25 @@ class Handler(BaseHTTPRequestHandler):
         DB.update_candidate(candidate_id, {"video_analysis_status": "queued", "video_analysis_detail": "분석 작업을 준비하고 있습니다."})
         threading.Thread(target=analyze_candidate_video, args=(candidate_id,), daemon=True).start()
         self.send_json({"status": "queued", "candidate_id": candidate_id}, HTTPStatus.ACCEPTED)
+
+    def start_candidate_video_fetch(self) -> None:
+        try:
+            candidate_id = int(self.path.strip("/").split("/")[2])
+        except (ValueError, IndexError):
+            self.send_error_json("잘못된 후보 ID입니다.")
+            return
+        candidate = DB.get_candidate(candidate_id)
+        if not candidate:
+            self.send_error_json("후보를 찾을 수 없습니다.", 404)
+            return
+        if detect_platform(candidate["url"]) not in {"instagram", "tiktok", "youtube"}:
+            self.send_error_json("Instagram, TikTok, YouTube 영상만 자동으로 가져올 수 있습니다.")
+            return
+        if candidate.get("video_analysis_status") in {"downloading", "queued", "analyzing"}:
+            self.send_error_json("이미 영상 가져오기 또는 분석이 진행 중입니다.", HTTPStatus.CONFLICT)
+            return
+        queue_candidate_video_fetch(candidate_id)
+        self.send_json({"status": "downloading", "candidate_id": candidate_id}, HTTPStatus.ACCEPTED)
 
     def start_candidate_tts(self) -> None:
         try:
