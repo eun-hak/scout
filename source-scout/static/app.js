@@ -1,6 +1,7 @@
 const form = document.querySelector('#candidate-form');
 const list = document.querySelector('#candidate-list');
 const template = document.querySelector('#candidate-template');
+const libraryTemplate = document.querySelector('#library-candidate-template');
 const message = document.querySelector('#form-message');
 const statusFilter = document.querySelector('#status-filter');
 const themeFilter = document.querySelector('#theme-filter');
@@ -19,6 +20,29 @@ const instagramResultTemplate = document.querySelector('#instagram-result-templa
 let installPrompt;
 let instagramItems = [];
 let jobPollTimer;
+
+const routePages = {'/':'home','/discover':'discover','/library':'library','/workspace':'workspace','/settings':'settings'};
+const page = routePages[location.pathname] || 'home';
+const pageCopy = {
+  home:['WORKFLOW OVERVIEW','쇼츠 제작의 시작점','새 링크를 넣고 현재 수집·검토 현황을 한눈에 확인하세요.'],
+  discover:['SOURCE DISCOVERY','소스 탐색','공개 검색과 구독 채널에서 다음 쇼츠 소재를 발견합니다.'],
+  library:['SOURCE LIBRARY','소스 보관함','확보한 영상을 목록으로 선별하고 개별 제작 작업실로 이동합니다.'],
+  workspace:['PRODUCTION WORKSPACE','제작 작업실','한 영상에 집중해 재생·분석·아이디어·TTS 작업을 진행합니다.'],
+  settings:['CONNECTIONS','연결 및 설정','모바일 수집 기기와 외부 연결을 관리합니다.']
+};
+document.body.dataset.page = page;
+document.querySelector('#page-eyebrow').textContent = pageCopy[page][0];
+document.querySelector('#page-title').textContent = pageCopy[page][1];
+document.querySelector('#page-description').textContent = pageCopy[page][2];
+document.querySelectorAll('[data-pages]').forEach(element => {
+  element.hidden = !element.dataset.pages.split(',').includes(page);
+});
+document.querySelector(`[data-nav="${page === 'workspace' ? 'library' : page}"]`)?.classList.add('active');
+if (page === 'workspace') {
+  document.querySelector('.workspace-back').hidden = false;
+  document.querySelector('#candidate-page-heading').textContent = '영상 제작 작업실';
+  document.querySelector('.filters').hidden = true;
+}
 
 const initialFilters = new URLSearchParams(location.search);
 if (initialFilters.get('status')) statusFilter.value = initialFilters.get('status');
@@ -74,21 +98,58 @@ async function api(path, options = {}) {
 }
 
 async function loadCandidates() {
+  if (page === 'workspace') {
+    const candidateId = Number(new URLSearchParams(location.search).get('id'));
+    list.className = 'candidate-list workspace-list';
+    list.innerHTML = '';
+    if (!candidateId) {
+      list.innerHTML = '<div class="empty">작업할 영상을 선택하지 않았습니다. <a href="/library">소스 보관함으로 이동</a></div>';
+      return;
+    }
+    const item = await api(`/api/candidates/${candidateId}`);
+    renderCandidate(item);
+    clearTimeout(jobPollTimer);
+    if (['downloading', 'queued', 'analyzing'].includes(item.video_analysis_status) || ['queued', 'generating'].includes(item.tts_status)) {
+      jobPollTimer = setTimeout(() => loadCandidates().catch(() => undefined), 3500);
+    }
+    return;
+  }
   const params = new URLSearchParams();
   if (statusFilter.value) params.set('status', statusFilter.value);
   if (themeFilter.value) params.set('theme', themeFilter.value);
   const data = await api(`/api/candidates?${params}`);
   renderStats(data.items);
   list.innerHTML = '';
+  if (page === 'home') return;
+  list.className = 'candidate-list library-grid';
   if (!data.items.length) {
     list.innerHTML = '<div class="empty">아직 조건에 맞는 후보가 없습니다.</div>';
     return;
   }
-  data.items.forEach(renderCandidate);
+  data.items.forEach(renderLibraryCandidate);
   clearTimeout(jobPollTimer);
   if (data.items.some(item => ['downloading', 'queued', 'analyzing'].includes(item.video_analysis_status) || ['queued', 'generating'].includes(item.tts_status))) {
     jobPollTimer = setTimeout(() => loadCandidates().catch(() => undefined), 3500);
   }
+}
+
+function renderLibraryCandidate(item) {
+  const node = libraryTemplate.content.cloneNode(true);
+  const image = node.querySelector('.library-thumb');
+  if (item.thumbnail_url) image.src = item.thumbnail_url;
+  else image.hidden = true;
+  image.alt = `${item.title} 미리보기`;
+  node.querySelector('.platform').textContent = item.platform;
+  node.querySelector('.theme').textContent = item.theme;
+  node.querySelector('.library-score').textContent = `${Math.round(item.total_score)}점`;
+  node.querySelector('h3').textContent = item.title;
+  node.querySelector('.library-meta').textContent = item.creator || '원작자 미확인';
+  node.querySelector('.library-video-badge').textContent = item.video_uploaded ? '영상 저장됨' : '링크만 저장';
+  const analysisLabels = {not_uploaded:'영상 대기',downloading:'영상 확보 중',download_failed:'가져오기 실패',ready:'분석 준비',queued:'분석 대기',analyzing:'Gemini 분석 중',complete:'아이디어 완료',failed:'분석 실패'};
+  node.querySelector('.library-analysis-state').textContent = analysisLabels[item.video_analysis_status] || item.video_analysis_status;
+  node.querySelector('.library-rights-state').textContent = rights[item.rights_status] || item.rights_status;
+  node.querySelector('.library-open').href = `/workspace?id=${item.id}`;
+  list.appendChild(node);
 }
 
 async function loadTokens() {
@@ -240,7 +301,8 @@ function renderCandidate(item) {
   node.querySelector('.delete').addEventListener('click', async () => {
     if (!confirm('이 후보를 삭제할까요?')) return;
     await api(`/api/candidates/${item.id}`, {method: 'DELETE'});
-    loadCandidates();
+    if (page === 'workspace') location.replace('/library');
+    else loadCandidates();
   });
   list.appendChild(node);
 }
@@ -405,11 +467,11 @@ form.addEventListener('submit', async event => {
   message.textContent = '저장 중...';
   const payload = Object.fromEntries(new FormData(form));
   try {
-    await api('/api/candidates', {method: 'POST', body: JSON.stringify(payload)});
+    const created = await api('/api/candidates', {method: 'POST', body: JSON.stringify(payload)});
     form.reset();
     document.querySelectorAll('input[type="range"]').forEach(input => input.nextElementSibling.value = input.value);
     message.textContent = '후보를 저장했습니다.';
-    await loadCandidates();
+    location.assign(`/workspace?id=${created.id}`);
   } catch (error) {
     message.textContent = error.message;
   }
@@ -489,8 +551,10 @@ logout.addEventListener('click', async () => {
   await fetch('/api/logout', {method: 'POST'});
   location.replace('/login');
 });
-loadCandidates().catch(error => list.innerHTML = `<div class="empty">${error.message}</div>`);
-loadTokens().catch(() => undefined);
-loadSources().catch(() => undefined);
-loadMetaStatus().catch(error => metaConnection.innerHTML = `<p class="muted">${escapeHtml(error.message)}</p>`);
+if (['home', 'library', 'workspace'].includes(page)) loadCandidates().catch(error => list.innerHTML = `<div class="empty">${error.message}</div>`);
+if (page === 'settings') loadTokens().catch(() => undefined);
+if (page === 'discover') {
+  loadSources().catch(() => undefined);
+  loadMetaStatus().catch(error => metaConnection.innerHTML = `<p class="muted">${escapeHtml(error.message)}</p>`);
+}
 navigator.serviceWorker?.register('/service-worker.js');

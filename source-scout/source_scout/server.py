@@ -373,7 +373,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path.startswith("/api/") and not self.require_auth():
             return
-        if parsed.path == "/" and not self.require_auth(api=False):
+        app_routes = {"/", "/library", "/workspace", "/discover", "/settings"}
+        if parsed.path in app_routes:
+            if not self.require_auth(api=False):
+                return
+            self.serve_static_file("index.html")
             return
         if parsed.path == "/api/candidates":
             query = parse_qs(parsed.query)
@@ -386,6 +390,18 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/api/candidates/") and parsed.path.endswith("/video-file"):
             self.serve_candidate_video(parsed)
             return
+        if parsed.path.startswith("/api/candidates/"):
+            parts = parsed.path.strip("/").split("/")
+            if len(parts) == 3:
+                try:
+                    candidate = DB.get_candidate(int(parts[2]))
+                except ValueError:
+                    candidate = None
+                if not candidate:
+                    self.send_error_json("후보를 찾을 수 없습니다.", 404)
+                else:
+                    self.send_json(public_candidate(candidate))
+                return
         if parsed.path == "/api/mobile-tokens":
             self.send_json({"items": DB.list_mobile_tokens()})
             return
