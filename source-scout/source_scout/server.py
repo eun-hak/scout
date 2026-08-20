@@ -177,7 +177,10 @@ def analyze_candidate_video(candidate_id: int) -> None:
         "video_analysis_detail": "Gemini가 영상의 장면과 음성을 분석하고 있습니다.",
     })
     try:
-        result = analyze_video(Path(candidate["video_path"]))
+        result = analyze_video(Path(candidate["video_path"]), context={
+            "title": candidate.get("title", ""), "creator": candidate.get("creator", ""),
+            "url": candidate.get("url", ""), "notes": candidate.get("notes", ""),
+        })
         DB.update_candidate(candidate_id, {
             "video_analysis_status": "complete",
             "video_analysis_detail": f"쇼츠 아이디어 {len(result.get('ideas') or [])}개를 추천했습니다.",

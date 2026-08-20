@@ -332,11 +332,18 @@ function renderVideoIdeas(node, item) {
     summary.textContent = `영상 관찰 · ${result.summary}`;
     ideaList.appendChild(summary);
   }
+  if ((result.perspective_map || []).length) {
+    const map = document.createElement('details');
+    map.className = 'perspective-map';
+    map.open = true;
+    map.innerHTML = `<summary>이 영상에서 발견한 관점 ${(result.perspective_map || []).length}가지</summary><div class="perspective-grid">${result.perspective_map.map(item => `<article><strong>${escapeHtml(item.category)}</strong><p>${escapeHtml(item.possibility)}</p><small>${escapeHtml(item.evidence)}${item.verification_needed ? ' · 추가 확인 필요' : ''}</small></article>`).join('')}</div>`;
+    ideaList.appendChild(map);
+  }
   (result.ideas || []).forEach((idea, index) => {
     const card = document.createElement('article');
     card.className = 'idea-card';
     const segments = (idea.recommended_segments || []).map(segment => `<button class="segment-button" type="button" data-seek="${Math.max(0, Number(segment.start) || 0)}"><span>${formatTime(segment.start)}–${formatTime(segment.end)}</span>${escapeHtml(segment.purpose)}</button>`).join('');
-    card.innerHTML = `<div class="idea-card-top"><span>IDEA ${index + 1} · ${escapeHtml(idea.angle)}</span><strong>${Math.max(0, Math.min(100, Number(idea.score) || 0))}점</strong></div><h4>${escapeHtml(idea.title)}</h4><p>${escapeHtml(idea.one_line_pitch)}</p><details><summary>구성과 추천 구간 보기</summary><div class="idea-detail"><b>훅 방향</b><ul>${(idea.hook_ideas || []).map(value => `<li>${escapeHtml(value)}</li>`).join('')}</ul><b>전개</b><ol>${(idea.story_flow || []).map(value => `<li>${escapeHtml(value)}</li>`).join('')}</ol>${segments ? `<b>추천 구간</b><div class="segment-list">${segments}</div>` : ''}${(idea.research_needed || []).length ? `<b>추가 조사</b><p>${escapeHtml(idea.research_needed.join(', '))}</p>` : ''}</div></details>`;
+    card.innerHTML = `<div class="idea-card-top"><span>IDEA ${index + 1} · ${escapeHtml(idea.perspective_category || idea.angle)}</span><strong>${Math.max(0, Math.min(100, Number(idea.score) || 0))}점</strong></div><div class="idea-tags"><span>${escapeHtml(idea.content_type || '쇼츠')}</span><span>${escapeHtml(idea.angle)}</span></div><h4>${escapeHtml(idea.title)}</h4><p>${escapeHtml(idea.one_line_pitch)}</p>${idea.why_this_angle ? `<p class="angle-reason"><b>왜 이 관점인가</b>${escapeHtml(idea.why_this_angle)}</p>` : ''}<details><summary>구성과 추천 구간 보기</summary><div class="idea-detail"><b>훅 방향</b><ul>${(idea.hook_ideas || []).map(value => `<li>${escapeHtml(value)}</li>`).join('')}</ul><b>전개</b><ol>${(idea.story_flow || []).map(value => `<li>${escapeHtml(value)}</li>`).join('')}</ol>${segments ? `<b>추천 구간</b><div class="segment-list">${segments}</div>` : ''}${(idea.research_needed || []).length ? `<b>추가 조사</b><p>${escapeHtml(idea.research_needed.join(', '))}</p>` : ''}</div></details>`;
     card.querySelectorAll('.segment-button').forEach(button => button.addEventListener('click', () => {
       if (!item.video_uploaded) return;
       preview.open = true;
